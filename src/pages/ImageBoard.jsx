@@ -26,9 +26,14 @@ import {
   updateArticleBlock,
   deleteArticle,
   getGoldRate,
+  getPhoto,
+  getPhotoHistory,
+  replacePhoto,
+  restorePhoto,
 } from '../db';
 import { CATEGORIES } from './ArticleTagger';
 import { computePrice, formatPKR, formatGrams } from '../priceUtils';
+import { fileToDataUrl } from '../imageUtils';
 
 const emptyForm = { name: '', category: CATEGORIES[0], weight_grams: '', description: '' };
 const MIN_BLOCK_PERCENT = 4;
@@ -111,6 +116,8 @@ function PhotoGallery() {
 function BlockBoard({ imageId }) {
   const navigate = useNavigate();
   const [blocks, setBlocks] = useState([]);
+  const [photo, setPhoto] = useState(null);
+  const [photoHistory, setPhotoHistory] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [addMode, setAddMode] = useState(false);
@@ -118,12 +125,20 @@ function BlockBoard({ imageId }) {
   const [form, setForm] = useState(emptyForm);
   const [toast, setToast] = useState(null);
   const [rate, setRate] = useState(0);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const imgRef = useRef(null);
   const dragInfo = useRef(null);
+  const photoInputRef = useRef(null);
 
   const load = useCallback(async () => {
-    const rows = await getArticlesForImage(imageId);
+    const [rows, photoRow, historyRows] = await Promise.all([
+      getArticlesForImage(imageId),
+      getPhoto(imageId),
+      getPhotoHistory(imageId),
+    ]);
     setBlocks(rows);
+    setPhoto(photoRow);
+    setPhotoHistory(historyRows);
     setLoaded(true);
   }, [imageId]);
 
@@ -141,7 +156,9 @@ function BlockBoard({ imageId }) {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const photoUri = blocks[0]?.image_uri;
+  // "photos" is the source of truth now; fall back to an article's own
+  // copy only if the photo row somehow hasn't loaded yet.
+  const photoUri = photo?.uri || blocks[0]?.image_uri;
   const selected = blocks.find((b) => b.id === selectedId) || null;
 
   // Same letterbox math as the Tag screen: maps a client point to a
@@ -279,6 +296,60 @@ function BlockBoard({ imageId }) {
     load();
   };
 
+  // Swaps the photo under every block for a new one. Block positions
+  // and sizes are stored as percentages on each article and are never
+  // touched here — only the picture changes. The old photo is kept in
+  // photo_history, not lost.
+  const onPhotoFileChange = async (evt) => {
+    const file = evt.target.files?.[0];
+    evt.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setToast('Please choose an image file.');
+      return;
+    }
+    if (
+      blocks.length > 0 &&
+      !window.confirm(
+        `Replace this photo? All ${blocks.length} block${blocks.length === 1 ? '' : 's'} stay exactly where they are — only the picture underneath changes. The current photo will be saved so you can bring it back later.`
+      )
+    ) {
+      return;
+    }
+    setAddMode(false);
+    setPendingTag(null);
+    setSelectedId(null);
+    setPhotoBusy(true);
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      await replacePhoto(imageId, dataUrl);
+      await load();
+      setToast('Photo updated — the previous one was saved below.');
+    } catch (err) {
+      setToast(err.message || 'Could not update the photo.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const onRestorePhoto = async (entry) => {
+    if (
+      !window.confirm('Use this earlier photo again? The photo currently showing will be saved in its place.')
+    ) {
+      return;
+    }
+    setPhotoBusy(true);
+    try {
+      await restorePhoto(imageId, entry.id);
+      await load();
+      setToast('Previous photo restored.');
+    } catch (err) {
+      setToast(err.message || 'Could not restore that photo.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
   const livePrice = computePrice(form.weight_grams, rate);
 
   if (loaded && blocks.length === 0) {
@@ -294,15 +365,32 @@ function BlockBoard({ imageId }) {
 
   return (
     <div>
-      <button
-        className={`btn ${addMode ? 'btn-gold' : 'btn-outline'} btn-block`}
-        onClick={() => {
-          setAddMode((v) => !v);
-          setSelectedId(null);
-        }}
-      >
-        {addMode ? '✕ Cancel — tap the photo to place it' : '➕ Create Block'}
-      </button>
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        onChange={onPhotoFileChange}
+        style={{ display: 'none' }}
+      />
+
+      <div className="button-pair">
+        <button
+          className={`btn ${addMode ? 'btn-gold' : 'btn-outline'} btn-block`}
+          onClick={() => {
+            setAddMode((v) => !v);
+            setSelectedId(null);
+          }}
+        >
+          {addMode ? '✕ Cancel' : '➕ Create Block'}
+        </button>
+        <button
+          className="btn btn-outline btn-block"
+          onClick={() => photoInputRef.current?.click()}
+          disabled={photoBusy}
+        >
+          {photoBusy ? 'Saving…' : '🖼️ Add Photo'}
+        </button>
+      </div>
 
       {addMode && <p className="hint">Tap anywhere on the photo to drop a new block</p>}
 
@@ -346,6 +434,28 @@ function BlockBoard({ imageId }) {
           </div>
         )}
       </div>
+
+      {photoHistory.length > 0 && (
+        <div className="prev-photos">
+          <div className="prev-photos-label">
+            Previous photo{photoHistory.length === 1 ? '' : 's'} ({photoHistory.length})
+          </div>
+          <div className="prev-photos-strip">
+            {photoHistory.map((h) => (
+              <button
+                key={h.id}
+                className="prev-photo-thumb"
+                onClick={() => onRestorePhoto(h)}
+                disabled={photoBusy}
+                title="Tap to use this photo again"
+                type="button"
+              >
+                <img src={h.uri} alt="Earlier version of this photo" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {selected && (
         <div className="block-inspector">
