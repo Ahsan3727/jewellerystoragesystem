@@ -129,6 +129,7 @@ function BlockBoard({ imageId }) {
   const imgRef = useRef(null);
   const dragInfo = useRef(null);
   const photoInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
 
   const load = useCallback(async () => {
     const [rows, photoRow, historyRows] = await Promise.all([
@@ -366,6 +367,14 @@ function BlockBoard({ imageId }) {
   return (
     <div>
       <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={onPhotoFileChange}
+        style={{ display: 'none' }}
+      />
+      <input
         ref={photoInputRef}
         type="file"
         accept="image/*"
@@ -373,26 +382,34 @@ function BlockBoard({ imageId }) {
         style={{ display: 'none' }}
       />
 
-      <div className="button-pair">
+      <button
+        className={`btn ${addMode ? 'btn-gold' : 'btn-outline'} btn-block`}
+        onClick={() => {
+          setAddMode((v) => !v);
+          setSelectedId(null);
+        }}
+      >
+        {addMode ? '✕ Cancel' : '➕ Create Block'}
+      </button>
+
+      {addMode && <p className="hint">Tap anywhere on the photo to drop a new block</p>}
+
+      <div className="button-pair" style={{ marginTop: 10 }}>
         <button
-          className={`btn ${addMode ? 'btn-gold' : 'btn-outline'} btn-block`}
-          onClick={() => {
-            setAddMode((v) => !v);
-            setSelectedId(null);
-          }}
+          className="btn btn-outline btn-block"
+          onClick={() => cameraInputRef.current?.click()}
+          disabled={photoBusy}
         >
-          {addMode ? '✕ Cancel' : '➕ Create Block'}
+          {photoBusy ? 'Saving…' : '📷 Take Photo'}
         </button>
         <button
           className="btn btn-outline btn-block"
           onClick={() => photoInputRef.current?.click()}
           disabled={photoBusy}
         >
-          {photoBusy ? 'Saving…' : '🖼️ Add Photo'}
+          {photoBusy ? 'Saving…' : '🖼️ Upload Photo'}
         </button>
       </div>
-
-      {addMode && <p className="hint">Tap anywhere on the photo to drop a new block</p>}
 
       <div style={{ marginTop: 12 }}>
         {photoUri ? (
