@@ -759,6 +759,55 @@ label.field-label {
   margin-top: 14px;
 }
 
+/* ---- Previous photos (Block board: photo-change history) ---- */
+
+.prev-photos {
+  margin-top: 14px;
+}
+
+.prev-photos-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.prev-photos-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.prev-photo-thumb {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.prev-photo-thumb:hover {
+  border-color: var(--gold);
+}
+
+.prev-photo-thumb:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.prev-photo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .nav-card {
     transition: none;
