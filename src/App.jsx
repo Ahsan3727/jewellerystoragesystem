@@ -8,6 +8,7 @@ import ArticleList from './pages/ArticleList';
 import ArticleForm from './pages/ArticleForm';
 import GoldRate from './pages/GoldRate';
 import ImageBoard from './pages/ImageBoard';
+import Backup from './pages/Backup';
 
 const TITLES = {
   '/': 'Jewelry Shop',
@@ -15,6 +16,7 @@ const TITLES = {
   '/articles': 'Articles',
   '/rate': 'Gold Rate',
   '/view': 'Photos',
+  '/backup': 'Backup & Restore',
 };
 
 function titleFor(pathname) {
@@ -84,6 +86,7 @@ export default function App() {
           <Route path="/rate" element={<GoldRate />} />
           <Route path="/view" element={<ImageBoard />} />
           <Route path="/view/:imageId" element={<ImageBoard />} />
+          <Route path="/backup" element={<Backup />} />
         </Routes>
       </main>
     </div>
