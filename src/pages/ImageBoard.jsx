@@ -23,6 +23,7 @@ import {
   getArticles,
   getArticlesForImage,
   addArticle,
+  updateArticle,
   updateArticleBlock,
   deleteArticle,
   getGoldRate,
@@ -123,6 +124,7 @@ function BlockBoard({ imageId }) {
   const [addMode, setAddMode] = useState(false);
   const [pendingTag, setPendingTag] = useState(null); // {top_percent, left_percent}
   const [form, setForm] = useState(emptyForm);
+  const [editForm, setEditForm] = useState(null); // {name, category, weight_grams, description} for the selected block
   const [toast, setToast] = useState(null);
   const [rate, setRate] = useState(0);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -297,6 +299,36 @@ function BlockBoard({ imageId }) {
     load();
   };
 
+  // Opens the edit form pre-filled with the selected block's current
+  // name/category/weight/description. Position and size on the photo
+  // are untouched here — this only edits the article's own data.
+  const startEditSelected = () => {
+    if (!selected) return;
+    setEditForm({
+      name: selected.name,
+      category: selected.category,
+      weight_grams: String(selected.weight_grams ?? ''),
+      description: selected.description || '',
+    });
+  };
+
+  const saveEditedBlock = async () => {
+    if (!selected || !editForm) return;
+    if (!editForm.name || !editForm.weight_grams) {
+      setToast('Name and weight are required.');
+      return;
+    }
+    await updateArticle(selected.id, {
+      name: editForm.name,
+      category: editForm.category,
+      weight_grams: parseFloat(editForm.weight_grams) || 0,
+      description: editForm.description,
+    });
+    await load();
+    setEditForm(null);
+    setToast(`"${editForm.name}" updated.`);
+  };
+
   // Swaps the photo under every block for a new one. Block positions
   // and sizes are stored as percentages on each article and are never
   // touched here — only the picture changes. The old photo is kept in
@@ -352,6 +384,7 @@ function BlockBoard({ imageId }) {
   };
 
   const livePrice = computePrice(form.weight_grams, rate);
+  const editLivePrice = computePrice(editForm?.weight_grams, rate);
 
   if (loaded && blocks.length === 0) {
     return (
@@ -488,13 +521,18 @@ function BlockBoard({ imageId }) {
           <p className="hint" style={{ marginTop: 6 }}>
             Drag the block to move it, or its gold handle to resize it.
           </p>
-          <div className="modal-actions">
+          <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
             <button className="link-btn link-delete" onClick={removeSelected}>
               Remove block
             </button>
-            <button className="btn btn-ghost" onClick={() => setSelectedId(null)}>
-              Done
-            </button>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+              <button className="link-btn link-edit" onClick={startEditSelected}>
+                Edit details
+              </button>
+              <button className="btn btn-ghost" onClick={() => setSelectedId(null)}>
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -552,6 +590,65 @@ function BlockBoard({ imageId }) {
               </button>
               <button className="btn btn-gold" onClick={saveNewBlock}>
                 Save Article
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editForm && (
+        <div className="modal-overlay" onClick={() => setEditForm(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h2 className="modal-title">Edit Article</h2>
+            <input
+              className="field"
+              placeholder="Article name (e.g. Gold Ring)"
+              value={editForm.name}
+              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+              autoFocus
+            />
+
+            <label className="field-label">Category / Tag</label>
+            <div className="chip-row">
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c}
+                  className={`chip ${editForm.category === c ? 'active' : ''}`}
+                  onClick={() => setEditForm({ ...editForm, category: c })}
+                  type="button"
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+
+            <input
+              className="field"
+              placeholder="Weight (grams)"
+              type="number"
+              inputMode="decimal"
+              step="0.001"
+              value={editForm.weight_grams}
+              onChange={(e) => setEditForm({ ...editForm, weight_grams: e.target.value })}
+            />
+
+            <div className="price-preview">
+              <span>Price at today's rate</span>
+              <strong>{formatPKR(editLivePrice)}</strong>
+            </div>
+
+            <textarea
+              className="field"
+              placeholder="Description (optional)"
+              value={editForm.description}
+              onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+            />
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setEditForm(null)}>
+                Cancel
+              </button>
+              <button className="btn btn-gold" onClick={saveEditedBlock}>
+                Save Changes
               </button>
             </div>
           </div>
