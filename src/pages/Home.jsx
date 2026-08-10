@@ -52,6 +52,11 @@ export default function Home() {
         <div className="nav-card-title">💰 Gold Rate</div>
         <div className="nav-card-sub">Set today's rate — every price updates automatically</div>
       </button>
+
+      <button className="nav-card" onClick={() => navigate('/backup')}>
+        <div className="nav-card-title">🛟 Backup & Restore</div>
+        <div className="nav-card-sub">Export the whole catalog to a file, or restore it on a new device</div>
+      </button>
     </div>
   );
 }
