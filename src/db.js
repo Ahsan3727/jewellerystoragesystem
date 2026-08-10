@@ -243,3 +243,83 @@ export async function getArticleStats() {
   const totalWeight = all.reduce((sum, a) => sum + (Number(a.weight_grams) || 0), 0);
   return { total: all.length, totalWeight };
 }
+
+/* ---------------------------- Backup (export / import everything) ---------------------------- */
+
+// Bumped whenever the shape of the export changes, so a future version
+// of the app can tell an old backup file apart from a new one.
+const BACKUP_FORMAT_VERSION = 1;
+
+// Dumps every store (articles + settings) into one plain JSON-safe
+// object. This is the entire catalog — the thing that disappears if
+// the browser clears storage — so it's deliberately store-agnostic:
+// add a new object store later and it still needs to be added here
+// explicitly (kept simple on purpose rather than "clever").
+export async function exportDatabase() {
+  const database = await getDb();
+  const articles = await promisify(tx(database, 'articles', 'readonly').getAll());
+  const settingsRows = await promisify(tx(database, 'settings', 'readonly').getAll());
+
+  return {
+    app: 'jewelry_business',
+    format_version: BACKUP_FORMAT_VERSION,
+    exported_at: new Date().toISOString(),
+    counts: { articles: articles.length },
+    data: {
+      articles,
+      settings: settingsRows,
+    },
+  };
+}
+
+// Restores a backup produced by exportDatabase(). mode:
+//   - 'replace' (default): wipes both stores first, then loads the
+//     backup — use for "restore this catalog on a new device/browser".
+//   - 'merge': keeps existing rows and adds the backup's articles as
+//     new rows (their old numeric ids are dropped so they don't clash
+//     with anything already here); the settings/gold-rate row is only
+//     written if none exists yet.
+// Runs as a single readwrite transaction across both stores so a
+// failure partway through doesn't leave the catalog half-restored.
+export async function importDatabase(backup, { mode = 'replace' } = {}) {
+  if (!backup || typeof backup !== 'object' || !backup.data || !Array.isArray(backup.data.articles)) {
+    throw new Error('That file doesn\u2019t look like a jewelry shop backup.');
+  }
+
+  const database = await getDb();
+  const transaction = database.transaction(['articles', 'settings'], 'readwrite');
+  const articleStore = transaction.objectStore('articles');
+  const settingsStore = transaction.objectStore('settings');
+
+  const done = new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error || new Error('Restore was aborted.'));
+  });
+
+  if (mode === 'replace') {
+    articleStore.clear();
+    settingsStore.clear();
+    for (const article of backup.data.articles) {
+      const { id, ...rest } = article;
+      articleStore.add(rest);
+    }
+    for (const row of backup.data.settings || []) {
+      settingsStore.put(row);
+    }
+  } else {
+    // merge
+    for (const article of backup.data.articles) {
+      const { id, ...rest } = article;
+      articleStore.add(rest);
+    }
+    const existingRate = await promisify(settingsStore.get(GOLD_RATE_KEY));
+    if (!existingRate) {
+      const incomingRate = (backup.data.settings || []).find((r) => r.key === GOLD_RATE_KEY);
+      if (incomingRate) settingsStore.put(incomingRate);
+    }
+  }
+
+  await done;
+  return { articlesImported: backup.data.articles.length, mode };
+}
