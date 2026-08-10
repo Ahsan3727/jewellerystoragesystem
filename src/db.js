@@ -203,6 +203,25 @@ export async function updateArticle(id, article) {
   await promisify(store.put(updated));
 }
 
+// Patches only a block's position/size on its photo (used by the block
+// view/manage screen when a block is dragged or resized) without
+// touching the article's name/category/weight/description.
+export async function updateArticleBlock(id, patch) {
+  const database = await getDb();
+  const store = tx(database, 'articles', 'readwrite');
+  const existing = await promisify(store.get(id));
+  if (!existing) return;
+  const updated = {
+    ...existing,
+    top_percent: patch.top_percent ?? existing.top_percent,
+    left_percent: patch.left_percent ?? existing.left_percent,
+    width_percent: patch.width_percent ?? existing.width_percent,
+    height_percent: patch.height_percent ?? existing.height_percent,
+  };
+  await promisify(store.put(updated));
+  return updated;
+}
+
 export async function setExportUri(id, export_uri) {
   const database = await getDb();
   const store = tx(database, 'articles', 'readwrite');
