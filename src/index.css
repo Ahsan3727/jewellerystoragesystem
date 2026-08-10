@@ -642,6 +642,123 @@ label.field-label {
   object-fit: contain;
 }
 
+/* ---- Photo gallery (view/manage blocks entry) ---- */
+
+.photo-gallery-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.photo-gallery-card {
+  display: block;
+  width: 100%;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.15s ease;
+}
+
+.photo-gallery-card:hover {
+  border-color: var(--gold);
+}
+
+.photo-gallery-card img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  display: block;
+  background: var(--surface);
+}
+
+.photo-gallery-info {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.photo-gallery-info strong {
+  color: var(--gold);
+  font-size: 13px;
+}
+
+.photo-gallery-info span {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Block board (resizable blocks over a photo) ---- */
+
+.image-wrap.placing {
+  cursor: copy;
+  border-color: var(--gold);
+}
+
+.photo-block {
+  position: absolute;
+  border: 2px solid rgba(212, 175, 55, 0.85);
+  background: rgba(212, 175, 55, 0.14);
+  border-radius: 6px;
+  box-sizing: border-box;
+  cursor: grab;
+  touch-action: none;
+}
+
+.photo-block.selected {
+  border-color: var(--gold);
+  background: rgba(212, 175, 55, 0.22);
+  box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.35);
+  z-index: 5;
+}
+
+.photo-block-label {
+  position: absolute;
+  top: -22px;
+  left: -2px;
+  background: rgba(212, 175, 55, 0.94);
+  color: #14120e;
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.resize-handle {
+  position: absolute;
+  right: -8px;
+  bottom: -8px;
+  width: 18px;
+  height: 18px;
+  background: var(--gold);
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.block-inspector {
+  background: var(--surface-alt);
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  padding: 14px;
+  margin-top: 14px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .nav-card {
     transition: none;
