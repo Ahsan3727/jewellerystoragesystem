@@ -43,6 +43,11 @@ export default function Home() {
         <div className="nav-card-sub">Browse, edit, export, or delete tagged pieces</div>
       </button>
 
+      <button className="nav-card" onClick={() => navigate('/view')}>
+        <div className="nav-card-title">🗂️ View Photo Blocks</div>
+        <div className="nav-card-sub">See each photo's blocks with their tags, resize them, or add new ones</div>
+      </button>
+
       <button className="nav-card" onClick={() => navigate('/rate')}>
         <div className="nav-card-title">💰 Gold Rate</div>
         <div className="nav-card-sub">Set today's rate — every price updates automatically</div>
