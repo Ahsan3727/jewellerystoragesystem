@@ -93,7 +93,7 @@ function PhotoGallery() {
           <button
             key={g.image_id}
             className="photo-gallery-card"
-            onClick={() => navigate(`/view/${g.image_id}`)}
+            onClick={() => navigate(`/inventory/board/${g.image_id}`)}
           >
             <img src={g.thumb} alt="" />
             <div className="photo-gallery-info">
@@ -390,7 +390,7 @@ function BlockBoard({ imageId }) {
     return (
       <div>
         <p className="empty">This photo has no blocks left.</p>
-        <button className="btn btn-outline btn-block" onClick={() => navigate('/view')}>
+        <button className="btn btn-outline btn-block" onClick={() => navigate('/inventory/board')}>
           ← Back to photos
         </button>
       </div>
