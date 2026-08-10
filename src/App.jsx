@@ -7,17 +7,20 @@ import ArticleTagger from './pages/ArticleTagger';
 import ArticleList from './pages/ArticleList';
 import ArticleForm from './pages/ArticleForm';
 import GoldRate from './pages/GoldRate';
+import ImageBoard from './pages/ImageBoard';
 
 const TITLES = {
   '/': 'Jewelry Shop',
   '/tag': 'Tag New Article',
   '/articles': 'Articles',
   '/rate': 'Gold Rate',
+  '/view': 'Photos',
 };
 
 function titleFor(pathname) {
   if (TITLES[pathname]) return TITLES[pathname];
   if (pathname.startsWith('/articles/')) return 'Edit Article';
+  if (pathname.startsWith('/view/')) return 'Manage Blocks';
   return 'Jewelry Shop';
 }
 
@@ -79,6 +82,8 @@ export default function App() {
           <Route path="/articles" element={<ArticleList />} />
           <Route path="/articles/:id" element={<ArticleForm />} />
           <Route path="/rate" element={<GoldRate />} />
+          <Route path="/view" element={<ImageBoard />} />
+          <Route path="/view/:imageId" element={<ImageBoard />} />
         </Routes>
       </main>
     </div>
