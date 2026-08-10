@@ -1,21 +1,33 @@
 // src/db.js
 //
-// IndexedDB layer for the shop. Two stores:
+// IndexedDB layer for the shop. Four stores:
 //   - "articles": every jewelry piece (a tagged block on a catalog
-//     photo) — name, category, weight in grams, description, image
-//     data + block position.
+//     photo) — name, category, weight in grams, description, its own
+//     copy of image_uri (kept in sync, see "photos" below) + block
+//     position.
 //   - "settings": one row, the gold rate (Rs per tola) you update from
 //     the Gold Rate screen. Every article's price is calculated live
 //     from weight × this rate, never stored — so changing the rate
 //     once updates every price in the app immediately.
+//   - "photos": one row per image_id — the actual photo everyone's
+//     blocks sit on top of right now. This is the source of truth for
+//     "what does this photo look like"; articles just carry a synced
+//     copy of image_uri for convenience (crop exports, the edit-article
+//     preview). Changing the photo on the block board updates this one
+//     row instead of every article that happens to reference it.
+//   - "photo_history": every photo a given image_id used to show
+//     before it was replaced, so "Add Photo" never throws the old
+//     picture away — it's saved and can be brought back later.
 //
 // v1 of this app shipped a "jewelry_products" store (tagged items) and
 // an unrelated "articles" store (a shop-blog CMS: title/author/status).
 // v2 drops the blog store and turns "articles" into the real jewelry
 // item table, carrying over anything that was in "jewelry_products".
+// v3 adds "photos" / "photo_history" and backfills "photos" from
+// whatever image_uri each existing article was already carrying.
 
 const DB_NAME = 'jewelry_business';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const GOLD_RATE_KEY = 'gold_rate_per_tola';
 
 let dbPromise;
@@ -40,6 +52,22 @@ export function getDb() {
         // --- settings store (gold rate) ---
         if (!database.objectStoreNames.contains('settings')) {
           database.createObjectStore('settings', { keyPath: 'key' });
+        }
+
+        // --- photos store (source of truth for each photo's CURRENT
+        // image — one row per image_id, added in v3) ---
+        if (!database.objectStoreNames.contains('photos')) {
+          database.createObjectStore('photos', { keyPath: 'image_id' });
+        }
+
+        // --- photo_history store (every image a photo used to be,
+        // kept whenever "Add Photo" replaces it — added in v3) ---
+        if (!database.objectStoreNames.contains('photo_history')) {
+          const history = database.createObjectStore('photo_history', {
+            keyPath: 'id',
+            autoIncrement: true,
+          });
+          history.createIndex('image_id', 'image_id');
         }
 
         // --- migrate v1 "jewelry_products" (tagged items) forward ---
@@ -99,6 +127,30 @@ export function getDb() {
               created_at: p.created_at || new Date().toISOString(),
             });
           }
+        }
+
+        // --- backfill "photos" from articles' own embedded image_uri
+        // (every article used to carry its own copy — v3 pulls that
+        // into one shared row per image_id so a photo only has to be
+        // changed in one place instead of on every article that uses
+        // it). Only needed once, moving up from an older version. ---
+        if (oldVersion < 3 && database.objectStoreNames.contains('articles')) {
+          const articleStore = upgradeTx.objectStore('articles');
+          const photoStore = upgradeTx.objectStore('photos');
+          const getAllArticlesReq = articleStore.getAll();
+          getAllArticlesReq.onsuccess = () => {
+            const seen = new Set();
+            for (const a of getAllArticlesReq.result || []) {
+              if (a.image_id == null || seen.has(a.image_id) || !a.image_uri) continue;
+              seen.add(a.image_id);
+              photoStore.put({
+                image_id: a.image_id,
+                uri: a.image_uri,
+                created_at: a.created_at || new Date().toISOString(),
+                updated_at: a.created_at || new Date().toISOString(),
+              });
+            }
+          };
         }
       };
 
@@ -244,30 +296,175 @@ export async function getArticleStats() {
   return { total: all.length, totalWeight };
 }
 
+/* ---------------------------- Photos (one row per image_id) ---------------------------- */
+//
+// The "photos" store is the source of truth for what a photo actually
+// looks like right now. Articles still carry their own image_uri copy
+// (cropImage() and the edit-article preview read it directly), but
+// every function below keeps that copy in sync automatically — so
+// changing a photo here never leaves an article pointing at a stale
+// picture.
+
+export async function getPhoto(image_id) {
+  const database = await getDb();
+  const store = tx(database, 'photos', 'readonly');
+  return promisify(store.get(image_id));
+}
+
+// Registers a brand-new photo — called the moment a photo is taken or
+// uploaded on the Tag screen, before any article/block exists for it.
+// No history entry: there's nothing to keep yet, this *is* the first
+// version.
+export async function createPhoto(image_id, uri) {
+  const database = await getDb();
+  const store = tx(database, 'photos', 'readwrite');
+  const existing = await promisify(store.get(image_id));
+  const now = new Date().toISOString();
+  const row = {
+    image_id,
+    uri,
+    created_at: existing?.created_at || now,
+    updated_at: now,
+  };
+  await promisify(store.put(row));
+  return row;
+}
+
+// Every earlier version of this photo, most-recently-replaced first.
+export async function getPhotoHistory(image_id) {
+  const database = await getDb();
+  const store = tx(database, 'photo_history', 'readonly');
+  const index = store.index('image_id');
+  const rows = await promisify(index.getAll(image_id));
+  return rows.sort((a, b) => (a.replaced_at < b.replaced_at ? 1 : -1));
+}
+
+// Swaps a photo's current image for a new one — the "Add Photo" button
+// on the block board. Block positions/sizes (top/left/width/height
+// percent, stored on each article) are never touched here, only the
+// picture underneath them changes. Whatever was showing before is kept
+// in photo_history instead of being thrown away, and every article on
+// this photo gets its own image_uri copy refreshed to match.
+export async function replacePhoto(image_id, newUri) {
+  const database = await getDb();
+  const transaction = database.transaction(['photos', 'photo_history', 'articles'], 'readwrite');
+  const photoStore = transaction.objectStore('photos');
+  const historyStore = transaction.objectStore('photo_history');
+  const articleStore = transaction.objectStore('articles');
+
+  const done = new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error || new Error('Could not save the new photo.'));
+  });
+
+  const existing = await promisify(photoStore.get(image_id));
+  const now = new Date().toISOString();
+
+  if (existing?.uri && existing.uri !== newUri) {
+    historyStore.add({ image_id, uri: existing.uri, replaced_at: now });
+  }
+
+  photoStore.put({
+    image_id,
+    uri: newUri,
+    created_at: existing?.created_at || now,
+    updated_at: now,
+  });
+
+  // Refresh every article's own image_uri copy so exports and the
+  // article edit screen show the new photo instead of the old one.
+  const cursorReq = articleStore.index('image_id').openCursor(IDBKeyRange.only(image_id));
+  cursorReq.onsuccess = () => {
+    const cursor = cursorReq.result;
+    if (!cursor) return;
+    cursor.update({ ...cursor.value, image_uri: newUri });
+    cursor.continue();
+  };
+
+  await done;
+  return { image_id, uri: newUri, created_at: existing?.created_at || now, updated_at: now };
+}
+
+// Brings back a specific previous photo from history and makes it
+// current again. Whatever is showing right now gets pushed into
+// history in its place, and the restored version's own history row is
+// removed (it's current now, not "previous").
+export async function restorePhoto(image_id, historyId) {
+  const database = await getDb();
+  const transaction = database.transaction(['photos', 'photo_history', 'articles'], 'readwrite');
+  const photoStore = transaction.objectStore('photos');
+  const historyStore = transaction.objectStore('photo_history');
+  const articleStore = transaction.objectStore('articles');
+
+  const done = new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error || new Error('Could not restore that photo.'));
+  });
+
+  const historyEntry = await promisify(historyStore.get(historyId));
+  if (!historyEntry || historyEntry.image_id !== image_id) {
+    throw new Error('That photo is no longer available.');
+  }
+  const existing = await promisify(photoStore.get(image_id));
+  const now = new Date().toISOString();
+
+  historyStore.delete(historyId);
+
+  if (existing?.uri && existing.uri !== historyEntry.uri) {
+    historyStore.add({ image_id, uri: existing.uri, replaced_at: now });
+  }
+
+  photoStore.put({
+    image_id,
+    uri: historyEntry.uri,
+    created_at: existing?.created_at || now,
+    updated_at: now,
+  });
+
+  const cursorReq = articleStore.index('image_id').openCursor(IDBKeyRange.only(image_id));
+  cursorReq.onsuccess = () => {
+    const cursor = cursorReq.result;
+    if (!cursor) return;
+    cursor.update({ ...cursor.value, image_uri: historyEntry.uri });
+    cursor.continue();
+  };
+
+  await done;
+  return { image_id, uri: historyEntry.uri };
+}
+
 /* ---------------------------- Backup (export / import everything) ---------------------------- */
 
 // Bumped whenever the shape of the export changes, so a future version
-// of the app can tell an old backup file apart from a new one.
-const BACKUP_FORMAT_VERSION = 1;
+// of the app can tell an old backup file apart from a new one. v2 adds
+// "photos" + "photo_history" alongside articles/settings.
+const BACKUP_FORMAT_VERSION = 2;
 
-// Dumps every store (articles + settings) into one plain JSON-safe
-// object. This is the entire catalog — the thing that disappears if
-// the browser clears storage — so it's deliberately store-agnostic:
-// add a new object store later and it still needs to be added here
-// explicitly (kept simple on purpose rather than "clever").
+// Dumps every store (articles + settings + photos + photo_history)
+// into one plain JSON-safe object. This is the entire catalog — the
+// thing that disappears if the browser clears storage — so it's
+// deliberately store-agnostic: add a new object store later and it
+// still needs to be added here explicitly (kept simple on purpose
+// rather than "clever").
 export async function exportDatabase() {
   const database = await getDb();
   const articles = await promisify(tx(database, 'articles', 'readonly').getAll());
   const settingsRows = await promisify(tx(database, 'settings', 'readonly').getAll());
+  const photos = await promisify(tx(database, 'photos', 'readonly').getAll());
+  const photoHistory = await promisify(tx(database, 'photo_history', 'readonly').getAll());
 
   return {
     app: 'jewelry_business',
     format_version: BACKUP_FORMAT_VERSION,
     exported_at: new Date().toISOString(),
-    counts: { articles: articles.length },
+    counts: { articles: articles.length, photos: photos.length },
     data: {
       articles,
       settings: settingsRows,
+      photos,
+      photo_history: photoHistory,
     },
   };
 }
@@ -287,9 +484,11 @@ export async function importDatabase(backup, { mode = 'replace' } = {}) {
   }
 
   const database = await getDb();
-  const transaction = database.transaction(['articles', 'settings'], 'readwrite');
+  const transaction = database.transaction(['articles', 'settings', 'photos', 'photo_history'], 'readwrite');
   const articleStore = transaction.objectStore('articles');
   const settingsStore = transaction.objectStore('settings');
+  const photoStore = transaction.objectStore('photos');
+  const historyStore = transaction.objectStore('photo_history');
 
   const done = new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve();
@@ -297,9 +496,38 @@ export async function importDatabase(backup, { mode = 'replace' } = {}) {
     transaction.onabort = () => reject(transaction.error || new Error('Restore was aborted.'));
   });
 
+  // Backup files saved before v2 (format_version 1) don't have a
+  // "photos" section at all — rebuild one from each article's own
+  // image_uri so the restored catalog still gets a proper photos store.
+  const backupPhotos = Array.isArray(backup.data.photos) ? backup.data.photos : null;
+  const backupHistory = Array.isArray(backup.data.photo_history) ? backup.data.photo_history : [];
+  const loadPhotos = (articles) => {
+    if (backupPhotos) {
+      for (const p of backupPhotos) photoStore.put(p);
+      for (const h of backupHistory) {
+        const { id, ...rest } = h;
+        historyStore.add(rest);
+      }
+      return;
+    }
+    const seen = new Set();
+    for (const a of articles) {
+      if (a.image_id == null || seen.has(a.image_id) || !a.image_uri) continue;
+      seen.add(a.image_id);
+      photoStore.put({
+        image_id: a.image_id,
+        uri: a.image_uri,
+        created_at: a.created_at || new Date().toISOString(),
+        updated_at: a.created_at || new Date().toISOString(),
+      });
+    }
+  };
+
   if (mode === 'replace') {
     articleStore.clear();
     settingsStore.clear();
+    photoStore.clear();
+    historyStore.clear();
     for (const article of backup.data.articles) {
       const { id, ...rest } = article;
       articleStore.add(rest);
@@ -307,6 +535,7 @@ export async function importDatabase(backup, { mode = 'replace' } = {}) {
     for (const row of backup.data.settings || []) {
       settingsStore.put(row);
     }
+    loadPhotos(backup.data.articles);
   } else {
     // merge
     for (const article of backup.data.articles) {
@@ -318,6 +547,7 @@ export async function importDatabase(backup, { mode = 'replace' } = {}) {
       const incomingRate = (backup.data.settings || []).find((r) => r.key === GOLD_RATE_KEY);
       if (incomingRate) settingsStore.put(incomingRate);
     }
+    loadPhotos(backup.data.articles);
   }
 
   await done;
