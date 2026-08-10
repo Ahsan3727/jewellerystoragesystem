@@ -31,7 +31,7 @@ up for every visitor or every device, that needs a real backend database
 (e.g. Vercel Postgres, Supabase) — the README in the original zip flagged
 this same trade-off for the phone version.
 
-## Project structure
+## Project structure (v2 layout)
 
 ```
 jewelry-shop-web/
@@ -39,19 +39,41 @@ jewelry-shop-web/
   package.json
   vite.config.js
   src/
-    main.jsx          # entry point, router setup
-    App.jsx            # top bar + route definitions
-    db.js               # IndexedDB layer (same function names as the old db.js)
-    imageUtils.js        # file picking → data URL, canvas crop/export
-    index.css             # all styling (dark/gold theme)
+    main.jsx                # entry point, router setup
+    App.jsx                  # route definitions + page titles
+    db.js                     # IndexedDB layer
+    imageUtils.js              # file picking → data URL, canvas crop/export
+    priceUtils.js                # weight × gold rate → price, formatting
+    index.css                     # all styling (dark/gold theme)
+    components/
+      AppShell.jsx                # persistent nav: sidebar (desktop) / bottom tab bar (mobile)
     pages/
-      Home.jsx
-      ProductTagger.jsx    # pick photo, tap to drop a tag, save
-      ProductList.jsx       # search/edit/delete/export products
-      ProductForm.jsx        # edit one product
-      ArticleManager.jsx      # search/edit/delete articles + stats
-      ArticleForm.jsx          # add/edit one article
+      Dashboard.jsx                # rate ticker, stats, category breakdown, recent items
+      ArticleTagger.jsx             # pick photo, tap to drop a tag, save   (/tag)
+      InventoryLayout.jsx            # tab switcher wrapping the two inventory views
+      ArticleList.jsx                 # searchable/filterable/sortable list + grid view (/inventory/list)
+      ImageBoard.jsx                   # photo gallery + drag/resize block board (/inventory/board[/:id])
+      ArticleForm.jsx                   # edit one article (/articles/:id)
+      GoldRate.jsx                       # set today's rate (/rate)
+      Settings.jsx                        # backup/restore + about (/settings)
 ```
+
+### What changed from v1
+
+The original version put every destination — Tag, Articles, Photo Blocks,
+Gold Rate, Backup — as a stack of buttons on the Home screen, so
+navigation lived inside scrollable page content. v2 pulls navigation out
+into a persistent shell (`AppShell.jsx`): a left sidebar on wide screens,
+a bottom tab bar on phones, both driven by the same five-item list.
+
+The old "Articles" list and "View Photo Blocks" gallery were two
+separate top-level screens showing the same underlying data two ways.
+They're now one **Inventory** section with a tab switcher
+(`InventoryLayout.jsx`), and the list view gained category filter chips,
+a sort control, and a grid view for browsing by photo. Backup/restore
+moved under **Settings**, since it's an occasional admin task rather
+than a daily one. Home became a real **Dashboard** with a per-category
+weight breakdown and a "recently tagged" shortcut.
 
 ## Run it locally first (recommended)
 
