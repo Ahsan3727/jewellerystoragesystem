@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { addArticle, getArticlesForImage, getGoldRate } from '../db';
+import { addArticle, createPhoto, getArticlesForImage, getGoldRate } from '../db';
 import { fileToDataUrl } from '../imageUtils';
 import { computePrice, formatPKR } from '../priceUtils';
 
@@ -32,8 +32,10 @@ export default function ArticleTagger() {
       return;
     }
     const dataUrl = await fileToDataUrl(file);
+    const newImageId = Date.now();
+    await createPhoto(newImageId, dataUrl); // registers it in the shared photos store right away
     setImageUri(dataUrl);
-    setImageId(Date.now());
+    setImageId(newImageId);
     setTags([]);
   };
 
