@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getArticle, updateArticle, getGoldRate, setArticleStatus, duplicateArticle } from '../db';
-import { computePrice, formatPKR } from '../priceUtils';
+import { computePrice, getDisplayPrice, formatPKR } from '../priceUtils';
 import { CATEGORIES } from './ArticleTagger';
 
 export default function ArticleForm() {
@@ -9,6 +9,7 @@ export default function ArticleForm() {
   const navigate = useNavigate();
   const [form, setForm] = useState(null);
   const [status, setStatus] = useState('in_stock');
+  const [soldInfo, setSoldInfo] = useState(null);
   const [image, setImage] = useState(null);
   const [rate, setRate] = useState(0);
   const [error, setError] = useState(null);
@@ -27,6 +28,7 @@ export default function ArticleForm() {
         description: article.description || '',
       });
       setStatus(article.status === 'sold' ? 'sold' : 'in_stock');
+      setSoldInfo(article.status === 'sold' ? article : null);
       setImage(article.export_uri || article.image_uri);
     });
     getGoldRate().then((r) => setRate(r.rate));
@@ -49,8 +51,9 @@ export default function ArticleForm() {
 
   const toggleStatus = async () => {
     const next = status === 'sold' ? 'in_stock' : 'sold';
-    await setArticleStatus(Number(id), next);
+    const updated = await setArticleStatus(Number(id), next);
     setStatus(next);
+    setSoldInfo(updated && updated.status === 'sold' ? updated : null);
     setToast(next === 'sold' ? 'Marked as sold.' : 'Back in stock.');
   };
 
@@ -111,6 +114,16 @@ export default function ArticleForm() {
         <span>Price at today's rate</span>
         <strong>{formatPKR(livePrice)}</strong>
       </div>
+
+      {status === 'sold' && soldInfo && (
+        <div className="price-preview price-preview-sold">
+          <span>
+            Sold {soldInfo.sold_at ? `on ${new Date(soldInfo.sold_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+            {soldInfo.sold_rate_per_tola ? ` · rate ${formatPKR(soldInfo.sold_rate_per_tola)}/tola` : ''}
+          </span>
+          <strong>{formatPKR(getDisplayPrice(soldInfo, rate))}</strong>
+        </div>
+      )}
 
       <textarea
         className="field"

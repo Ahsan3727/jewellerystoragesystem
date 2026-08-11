@@ -42,7 +42,7 @@ import {
   restorePhoto,
 } from '../db';
 import { CATEGORIES } from './ArticleTagger';
-import { computePrice, formatPKR, formatGrams } from '../priceUtils';
+import { computePrice, getDisplayPrice, formatPKR, formatGrams } from '../priceUtils';
 import { fileToDataUrl } from '../imageUtils';
 
 const emptyForm = { name: '', category: CATEGORIES[0], weight_grams: '', description: '' };
@@ -613,7 +613,7 @@ function BlockBoard({ imageId }) {
             {selected.name} <span className="cat-tag">{selected.category}</span>
           </div>
           <div className="row-meta">
-            {formatGrams(selected.weight_grams)} · {formatPKR(computePrice(selected.weight_grams, rate))}
+            {formatGrams(selected.weight_grams)} · {formatPKR(getDisplayPrice(selected, rate))}
           </div>
           <div className="row-meta">
             Block size: {Math.round(selected.width_percent)}% × {Math.round(selected.height_percent)}% of photo

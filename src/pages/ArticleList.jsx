@@ -18,7 +18,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom';
 import { getArticles, deleteArticle, setExportUri, getGoldRate, duplicateArticle, setArticleStatus } from '../db';
 import { cropImage, downloadDataUrl } from '../imageUtils';
-import { computePrice, formatPKR, formatGrams } from '../priceUtils';
+import { getDisplayPrice, formatPKR, formatGrams } from '../priceUtils';
 import { CATEGORIES } from './ArticleTagger';
 
 const SORTS = [
@@ -159,7 +159,7 @@ export default function ArticleList() {
         rows.sort((a, b) => (Number(b.weight_grams) || 0) - (Number(a.weight_grams) || 0));
         break;
       case 'price':
-        rows.sort((a, b) => computePrice(b.weight_grams, rate) - computePrice(a.weight_grams, rate));
+        rows.sort((a, b) => getDisplayPrice(b, rate) - getDisplayPrice(a, rate));
         break;
       default:
         rows.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
@@ -253,7 +253,7 @@ export default function ArticleList() {
                   {item.name} <span className="cat-tag">{item.category}</span>
                 </div>
                 <div className="row-meta">
-                  {formatGrams(item.weight_grams)} · {formatPKR(computePrice(item.weight_grams, rate))}
+                  {formatGrams(item.weight_grams)} · {formatPKR(getDisplayPrice(item, rate))}
                 </div>
                 <button
                   className={`status-pill ${item.status === 'sold' ? 'is-sold' : ''}`}
@@ -292,7 +292,7 @@ export default function ArticleList() {
                 <div className="row-name">{item.name}</div>
                 <span className="cat-tag">{item.category}</span>
                 <div className="row-meta">
-                  {formatGrams(item.weight_grams)} · {formatPKR(computePrice(item.weight_grams, rate))}
+                  {formatGrams(item.weight_grams)} · {formatPKR(getDisplayPrice(item, rate))}
                 </div>
                 <button
                   className={`status-pill ${item.status === 'sold' ? 'is-sold' : ''}`}

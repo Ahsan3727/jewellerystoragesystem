@@ -9,10 +9,11 @@
 // than a handful of pieces), and a peek at what was tagged most
 // recently.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getArticles, getArticleStats, getGoldRate } from '../db';
-import { computePrice, formatPKR, formatGrams } from '../priceUtils';
+import { computePrice, getDisplayPrice, formatPKR, formatGrams } from '../priceUtils';
+import { summarizeRange, todayStart } from '../salesUtils';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -20,6 +21,7 @@ export default function Dashboard() {
   const [rate, setRate] = useState({ rate: 0, updated_at: null });
   const [breakdown, setBreakdown] = useState([]);
   const [recent, setRecent] = useState([]);
+  const [allArticles, setAllArticles] = useState([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -27,6 +29,7 @@ export default function Dashboard() {
     getGoldRate().then(setRate);
     getArticles().then((all) => {
       setRecent(all.slice(0, 4));
+      setAllArticles(all);
 
       const byCategory = new Map();
       for (const a of all) {
@@ -44,6 +47,11 @@ export default function Dashboard() {
 
   const inStockValue = computePrice(stats.inStockWeight, rate.rate);
   const maxWeight = breakdown.length ? Math.max(...breakdown.map((b) => b.weight)) : 0;
+
+  const soldToday = useMemo(() => {
+    const soldOnly = allArticles.filter((a) => a.status === 'sold');
+    return summarizeRange(soldOnly, todayStart(), rate.rate);
+  }, [allArticles, rate.rate]);
 
   return (
     <div>
@@ -77,7 +85,21 @@ export default function Dashboard() {
           <span className="quick-action-icon">🗂️</span>
           <span>Photo Boards</span>
         </button>
+        <button className="quick-action" onClick={() => navigate('/sales')} type="button">
+          <span className="quick-action-icon">🧾</span>
+          <span>Sales Record</span>
+        </button>
       </div>
+
+      <button className="rate-ticker rate-ticker-sales" onClick={() => navigate('/sales')} type="button">
+        <div>
+          <span className="rate-ticker-label">Sold Today</span>
+          <span className="rate-ticker-value">
+            {soldToday.count} item{soldToday.count === 1 ? '' : 's'} · {formatPKR(soldToday.revenue)}
+          </span>
+        </div>
+        <span className="rate-ticker-edit">Sales Record →</span>
+      </button>
 
       {loaded && breakdown.length === 0 && recent.length === 0 && (
         <div className="panel">
@@ -133,7 +155,7 @@ export default function Dashboard() {
                   {item.status === 'sold' && <span className="sold-badge">Sold</span>}
                 </div>
                 <div className="row-meta">
-                  {formatGrams(item.weight_grams)} · {formatPKR(computePrice(item.weight_grams, rate.rate))}
+                  {formatGrams(item.weight_grams)} · {formatPKR(getDisplayPrice(item, rate.rate))}
                 </div>
               </div>
             </button>
