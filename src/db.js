@@ -26,7 +26,7 @@
 // v3 adds "photos" / "photo_history" and backfills "photos" from
 // whatever image_uri each existing article was already carrying.
 
-import { computePrice } from './priceUtils';
+import { computePrice, getGoldWeight } from './priceUtils';
 
 const DB_NAME = 'jewelry_business';
 const DB_VERSION = 3;
@@ -202,6 +202,7 @@ export async function addArticle(article) {
     name: article.name,
     category: article.category || 'Other',
     weight_grams: Number(article.weight_grams) || 0,
+    stone_weight_grams: Number(article.stone_weight_grams) || 0,
     description: article.description || '',
     image_uri: article.image_uri,
     image_id: article.image_id,
@@ -256,6 +257,7 @@ export async function updateArticle(id, article) {
     name: article.name,
     category: article.category || 'Other',
     weight_grams: Number(article.weight_grams) || 0,
+    stone_weight_grams: Number(article.stone_weight_grams) || 0,
     description: article.description || '',
   };
   await promisify(store.put(updated));
@@ -296,7 +298,8 @@ export async function setExportUri(id, export_uri) {
 //
 // The moment a piece is marked sold, this also locks in *how* it was
 // priced: today's gold rate (sold_rate_per_tola) and the resulting
-// price (sold_price = weight × that rate, via the same computePrice()
+// price (sold_price = gold weight × that rate — weight minus any
+// stone_weight_grams, via the same computePrice()/getGoldWeight()
 // every other screen uses). That snapshot is what the Sales screen and
 // every "sold" price display read from afterwards, instead of
 // recalculating off whatever the gold rate happens to be today — so a
@@ -327,7 +330,7 @@ export async function setArticleStatus(id, status) {
       status: 'sold',
       sold_at: new Date().toISOString(),
       sold_rate_per_tola: ratePerTola,
-      sold_price: computePrice(existing.weight_grams, ratePerTola),
+      sold_price: computePrice(getGoldWeight(existing.weight_grams, existing.stone_weight_grams), ratePerTola),
     };
   } else {
     updated = {
@@ -397,12 +400,21 @@ export async function getArticleStats() {
   const all = await promisify(store.getAll());
   const inStock = all.filter((a) => a.status !== 'sold');
   const sold = all.filter((a) => a.status === 'sold');
+  // Scale weight — gold + stones together, exactly what's physically in
+  // the piece. Used for the "Stock Weight" display, which should show
+  // what's really sitting in the shop.
   const sumWeight = (rows) => rows.reduce((sum, a) => sum + (Number(a.weight_grams) || 0), 0);
+  // Gold-only weight — stone_weight_grams subtracted out. Used for
+  // anything priced off the gold rate, so stone-set pieces aren't
+  // valued as if the stones were gold too.
+  const sumGoldWeight = (rows) =>
+    rows.reduce((sum, a) => sum + getGoldWeight(a.weight_grams, a.stone_weight_grams), 0);
   return {
     total: all.length,
     totalWeight: sumWeight(all),
     inStockCount: inStock.length,
     inStockWeight: sumWeight(inStock),
+    inStockGoldWeight: sumGoldWeight(inStock),
     soldCount: sold.length,
     soldWeight: sumWeight(sold),
   };
