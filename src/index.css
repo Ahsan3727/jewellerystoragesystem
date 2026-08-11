@@ -445,6 +445,14 @@ button {
   border-radius: 6px;
 }
 
+.category-bar-value {
+  font-size: 12px;
+  color: var(--gold);
+  font-family: var(--font-display);
+  margin-top: 4px;
+  text-align: right;
+}
+
 .list-row-link {
   border: none;
   width: 100%;
