@@ -208,6 +208,8 @@ export async function addArticle(article) {
     width_percent: article.width_percent ?? 15,
     height_percent: article.height_percent ?? 15,
     export_uri: null,
+    status: article.status === 'sold' ? 'sold' : 'in_stock',
+    sold_at: article.status === 'sold' ? new Date().toISOString() : null,
     created_at: new Date().toISOString(),
   };
   return promisify(store.add(row));
@@ -282,6 +284,50 @@ export async function setExportUri(id, export_uri) {
   await promisify(store.put({ ...existing, export_uri }));
 }
 
+// Toggles an article between 'in_stock' and 'sold'. Sold pieces stay in
+// the catalog (nothing here deletes anything) but drop out of the
+// dashboard's in-stock weight/value totals and render dimmed on the
+// photo board, so a shop owner can tell what's still available to sell
+// at a glance without losing the record of what moved.
+export async function setArticleStatus(id, status) {
+  const database = await getDb();
+  const store = tx(database, 'articles', 'readwrite');
+  const existing = await promisify(store.get(id));
+  if (!existing) return;
+  const updated = {
+    ...existing,
+    status: status === 'sold' ? 'sold' : 'in_stock',
+    sold_at: status === 'sold' ? new Date().toISOString() : null,
+  };
+  await promisify(store.put(updated));
+  return updated;
+}
+
+// Clones an article — same photo, category, weight, description — as a
+// fresh in-stock piece placed just next to the original block so it's
+// easy to spot and re-drag into place. Handy when several near-identical
+// items (a set of bangles, matching earrings) get tagged one after another.
+export async function duplicateArticle(id) {
+  const database = await getDb();
+  const store = tx(database, 'articles', 'readwrite');
+  const existing = await promisify(store.get(id));
+  if (!existing) return null;
+  const { id: _oldId, ...rest } = existing;
+  const width = rest.width_percent ?? 15;
+  const height = rest.height_percent ?? 15;
+  const row = {
+    ...rest,
+    name: `${existing.name} (Copy)`,
+    status: 'in_stock',
+    sold_at: null,
+    export_uri: null,
+    created_at: new Date().toISOString(),
+    left_percent: Math.min(100 - width, (rest.left_percent || 0) + 4),
+    top_percent: Math.min(100 - height, (rest.top_percent || 0) + 4),
+  };
+  return promisify(store.add(row));
+}
+
 export async function deleteArticle(id) {
   const database = await getDb();
   const store = tx(database, 'articles', 'readwrite');
@@ -292,8 +338,17 @@ export async function getArticleStats() {
   const database = await getDb();
   const store = tx(database, 'articles', 'readonly');
   const all = await promisify(store.getAll());
-  const totalWeight = all.reduce((sum, a) => sum + (Number(a.weight_grams) || 0), 0);
-  return { total: all.length, totalWeight };
+  const inStock = all.filter((a) => a.status !== 'sold');
+  const sold = all.filter((a) => a.status === 'sold');
+  const sumWeight = (rows) => rows.reduce((sum, a) => sum + (Number(a.weight_grams) || 0), 0);
+  return {
+    total: all.length,
+    totalWeight: sumWeight(all),
+    inStockCount: inStock.length,
+    inStockWeight: sumWeight(inStock),
+    soldCount: sold.length,
+    soldWeight: sumWeight(sold),
+  };
 }
 
 /* ---------------------------- Photos (one row per image_id) ---------------------------- */
