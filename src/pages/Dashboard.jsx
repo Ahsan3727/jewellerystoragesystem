@@ -17,7 +17,7 @@ import { summarizeRange, todayStart } from '../salesUtils';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [stats, setStats] = useState({ inStockCount: 0, inStockWeight: 0, soldCount: 0 });
+  const [stats, setStats] = useState({ inStockCount: 0, inStockWeight: 0, inStockGoldWeight: 0, soldCount: 0 });
   const [rate, setRate] = useState({ rate: 0, updated_at: null });
   const [breakdown, setBreakdown] = useState([]);
   const [recent, setRecent] = useState([]);
@@ -45,7 +45,10 @@ export default function Dashboard() {
     });
   }, []);
 
-  const inStockValue = computePrice(stats.inStockWeight, rate.rate);
+  // Stock Value is priced off gold weight only (scale weight minus any
+  // stone weight) — see priceUtils.getGoldWeight — so stone-set pieces
+  // aren't valued as if their stones were gold too.
+  const inStockValue = computePrice(stats.inStockGoldWeight, rate.rate);
   const maxWeight = breakdown.length ? Math.max(...breakdown.map((b) => b.weight)) : 0;
 
   const soldToday = useMemo(() => {

@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { addArticle, createPhoto, getArticlesForImage, getGoldRate } from '../db';
 import { fileToDataUrl } from '../imageUtils';
-import { computePrice, formatPKR } from '../priceUtils';
+import { computePrice, getGoldWeight, formatPKR, formatGrams } from '../priceUtils';
 
 export const CATEGORIES = ['Ring', 'Necklace', 'Bangle', 'Earring', 'Chain', 'Bracelet', 'Set', 'Other'];
 
-const emptyForm = { name: '', category: CATEGORIES[0], weight_grams: '', description: '' };
+const emptyForm = { name: '', category: CATEGORIES[0], weight_grams: '', stone_weight_grams: '', description: '' };
 
 export default function ArticleTagger() {
   const navigate = useNavigate();
@@ -85,6 +85,7 @@ export default function ArticleTagger() {
       name: form.name,
       category: form.category,
       weight_grams: parseFloat(form.weight_grams) || 0,
+      stone_weight_grams: parseFloat(form.stone_weight_grams) || 0,
       description: form.description,
       image_uri: imageUri,
       image_id: imageId,
@@ -105,7 +106,8 @@ export default function ArticleTagger() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const livePrice = computePrice(form.weight_grams, rate);
+  const liveGoldWeight = getGoldWeight(form.weight_grams, form.stone_weight_grams);
+  const livePrice = computePrice(liveGoldWeight, rate);
 
   return (
     <div>
@@ -199,8 +201,21 @@ export default function ArticleTagger() {
               onChange={(e) => setForm({ ...form, weight_grams: e.target.value })}
             />
 
+            <input
+              className="field"
+              placeholder="Stone weight (grams, if any)"
+              type="number"
+              inputMode="decimal"
+              step="0.001"
+              value={form.stone_weight_grams}
+              onChange={(e) => setForm({ ...form, stone_weight_grams: e.target.value })}
+            />
+
             <div className="price-preview">
-              <span>Price at today's rate</span>
+              <span>
+                Price at today's rate
+                {form.stone_weight_grams ? ` · ${formatGrams(liveGoldWeight)} gold` : ''}
+              </span>
               <strong>{formatPKR(livePrice)}</strong>
             </div>
 

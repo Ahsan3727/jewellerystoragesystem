@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getArticle, updateArticle, getGoldRate, setArticleStatus, duplicateArticle } from '../db';
-import { computePrice, getDisplayPrice, formatPKR } from '../priceUtils';
+import { computePrice, getDisplayPrice, getGoldWeight, formatPKR, formatGrams } from '../priceUtils';
 import { CATEGORIES } from './ArticleTagger';
 
 export default function ArticleForm() {
@@ -25,6 +25,7 @@ export default function ArticleForm() {
         name: article.name,
         category: article.category || 'Other',
         weight_grams: String(article.weight_grams ?? ''),
+        stone_weight_grams: String(article.stone_weight_grams ?? ''),
         description: article.description || '',
       });
       setStatus(article.status === 'sold' ? 'sold' : 'in_stock');
@@ -65,7 +66,8 @@ export default function ArticleForm() {
   if (error) return <p className="empty">{error}</p>;
   if (!form) return null;
 
-  const livePrice = computePrice(form.weight_grams, rate);
+  const liveGoldWeight = getGoldWeight(form.weight_grams, form.stone_weight_grams);
+  const livePrice = computePrice(liveGoldWeight, rate);
 
   return (
     <div>
@@ -110,8 +112,21 @@ export default function ArticleForm() {
         step="0.001"
       />
 
+      <input
+        className="field"
+        value={form.stone_weight_grams}
+        onChange={(e) => setForm({ ...form, stone_weight_grams: e.target.value })}
+        placeholder="Stone weight (grams, if any)"
+        type="number"
+        inputMode="decimal"
+        step="0.001"
+      />
+
       <div className="price-preview">
-        <span>Price at today's rate</span>
+        <span>
+          Price at today's rate
+          {form.stone_weight_grams ? ` · ${formatGrams(liveGoldWeight)} gold` : ''}
+        </span>
         <strong>{formatPKR(livePrice)}</strong>
       </div>
 

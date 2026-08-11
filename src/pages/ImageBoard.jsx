@@ -42,10 +42,10 @@ import {
   restorePhoto,
 } from '../db';
 import { CATEGORIES } from './ArticleTagger';
-import { computePrice, getDisplayPrice, formatPKR, formatGrams } from '../priceUtils';
+import { computePrice, getDisplayPrice, getGoldWeight, formatPKR, formatGrams } from '../priceUtils';
 import { fileToDataUrl } from '../imageUtils';
 
-const emptyForm = { name: '', category: CATEGORIES[0], weight_grams: '', description: '' };
+const emptyForm = { name: '', category: CATEGORIES[0], weight_grams: '', stone_weight_grams: '', description: '' };
 const MIN_BLOCK_PERCENT = 4;
 const UNDO_DELAY_MS = 5000;
 const CORNERS = ['nw', 'ne', 'sw', 'se'];
@@ -138,7 +138,7 @@ function BlockBoard({ imageId }) {
   const [addMode, setAddMode] = useState(false);
   const [pendingTag, setPendingTag] = useState(null); // {top_percent, left_percent}
   const [form, setForm] = useState(emptyForm);
-  const [editForm, setEditForm] = useState(null); // {name, category, weight_grams, description} for the selected block
+  const [editForm, setEditForm] = useState(null); // {name, category, weight_grams, stone_weight_grams, description} for the selected block
   const [toast, setToast] = useState(null); // { message, undo? }
   const [rate, setRate] = useState(0);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -334,6 +334,7 @@ function BlockBoard({ imageId }) {
       name: form.name,
       category: form.category,
       weight_grams: parseFloat(form.weight_grams) || 0,
+      stone_weight_grams: parseFloat(form.stone_weight_grams) || 0,
       description: form.description,
       image_uri: photoUri,
       image_id: imageId,
@@ -403,6 +404,7 @@ function BlockBoard({ imageId }) {
       name: selected.name,
       category: selected.category,
       weight_grams: String(selected.weight_grams ?? ''),
+      stone_weight_grams: String(selected.stone_weight_grams ?? ''),
       description: selected.description || '',
     });
   };
@@ -417,6 +419,7 @@ function BlockBoard({ imageId }) {
       name: editForm.name,
       category: editForm.category,
       weight_grams: parseFloat(editForm.weight_grams) || 0,
+      stone_weight_grams: parseFloat(editForm.stone_weight_grams) || 0,
       description: editForm.description,
     });
     await load();
@@ -478,8 +481,10 @@ function BlockBoard({ imageId }) {
     }
   };
 
-  const livePrice = computePrice(form.weight_grams, rate);
-  const editLivePrice = computePrice(editForm?.weight_grams, rate);
+  const liveGoldWeight = getGoldWeight(form.weight_grams, form.stone_weight_grams);
+  const livePrice = computePrice(liveGoldWeight, rate);
+  const editLiveGoldWeight = getGoldWeight(editForm?.weight_grams, editForm?.stone_weight_grams);
+  const editLivePrice = computePrice(editLiveGoldWeight, rate);
 
   if (loaded && blocks.length === 0) {
     return (
@@ -613,7 +618,10 @@ function BlockBoard({ imageId }) {
             {selected.name} <span className="cat-tag">{selected.category}</span>
           </div>
           <div className="row-meta">
-            {formatGrams(selected.weight_grams)} · {formatPKR(getDisplayPrice(selected, rate))}
+            {formatGrams(selected.weight_grams)}
+            {selected.stone_weight_grams ? ` (${formatGrams(getGoldWeight(selected.weight_grams, selected.stone_weight_grams))} gold)` : ''}
+            {' · '}
+            {formatPKR(getDisplayPrice(selected, rate))}
           </div>
           <div className="row-meta">
             Block size: {Math.round(selected.width_percent)}% × {Math.round(selected.height_percent)}% of photo
@@ -683,8 +691,21 @@ function BlockBoard({ imageId }) {
               onChange={(e) => setForm({ ...form, weight_grams: e.target.value })}
             />
 
+            <input
+              className="field"
+              placeholder="Stone weight (grams, if any)"
+              type="number"
+              inputMode="decimal"
+              step="0.001"
+              value={form.stone_weight_grams}
+              onChange={(e) => setForm({ ...form, stone_weight_grams: e.target.value })}
+            />
+
             <div className="price-preview">
-              <span>Price at today's rate</span>
+              <span>
+                Price at today's rate
+                {form.stone_weight_grams ? ` · ${formatGrams(liveGoldWeight)} gold` : ''}
+              </span>
               <strong>{formatPKR(livePrice)}</strong>
             </div>
 
@@ -742,8 +763,21 @@ function BlockBoard({ imageId }) {
               onChange={(e) => setEditForm({ ...editForm, weight_grams: e.target.value })}
             />
 
+            <input
+              className="field"
+              placeholder="Stone weight (grams, if any)"
+              type="number"
+              inputMode="decimal"
+              step="0.001"
+              value={editForm.stone_weight_grams}
+              onChange={(e) => setEditForm({ ...editForm, stone_weight_grams: e.target.value })}
+            />
+
             <div className="price-preview">
-              <span>Price at today's rate</span>
+              <span>
+                Price at today's rate
+                {editForm.stone_weight_grams ? ` · ${formatGrams(editLiveGoldWeight)} gold` : ''}
+              </span>
               <strong>{formatPKR(editLivePrice)}</strong>
             </div>
 
