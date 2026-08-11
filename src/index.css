@@ -1457,6 +1457,65 @@ label.field-label {
   cursor: nwse-resize;
 }
 
+/* ---- Crop-adjustment modal (shown right after a photo is picked) ---- */
+
+.crop-modal-card {
+  max-width: 560px;
+}
+
+.crop-stage-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+/* Sized in JS to the image's exact rendered pixel dimensions (see
+   ImageCropModal) — no CSS letterboxing, so there's no offset between
+   what's drawn and what the drag math thinks is on screen. */
+.crop-stage {
+  position: relative;
+  max-width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.crop-stage-loading {
+  width: 100%;
+  height: min(50vh, 420px);
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.crop-stage img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The 9999px shadow spread darkens everything outside the crop box —
+   clipped to the stage by its overflow: hidden, so no extra mask
+   element is needed. */
+.crop-rect {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--gold);
+  box-shadow: 0 0 0 9999px rgba(10, 9, 7, 0.65);
+  cursor: grab;
+  touch-action: none;
+}
+
+.crop-rect:active {
+  cursor: grabbing;
+}
+
 .block-inspector {
   background: var(--surface-alt);
   border: 1px solid var(--gold);
