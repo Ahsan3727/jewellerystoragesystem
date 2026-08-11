@@ -22,6 +22,7 @@ export const NAV_ITEMS = [
     match: (p) => p.startsWith('/inventory') || p.startsWith('/articles/'),
   },
   { to: '/rate', label: 'Gold Rate', icon: '💰', match: (p) => p === '/rate' },
+  { to: '/sales', label: 'Sales', icon: '🧾', match: (p) => p === '/sales' },
   { to: '/settings', label: 'Settings', icon: '⚙️', match: (p) => p === '/settings' },
 ];
 
