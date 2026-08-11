@@ -5,6 +5,19 @@
 //   - expo-image-manipulator -> the Canvas API (draw + crop + re-export as JPEG)
 // Both run entirely on the visitor's device; no upload, no server.
 
+// Reads a picked File as-is, with no resizing — used right before the
+// crop-adjustment step so cropping works from full resolution instead
+// of an already-downscaled copy. The final export (cropDataUrl below)
+// does the downscaling once the crop is confirmed.
+export function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+}
+
 // Reads a picked File and returns it as a resized, compressed data URL
 // (so large phone photos don't bloat IndexedDB). Mirrors the old
 // `ImagePicker.launchImageLibraryAsync({ quality: 0.9 })` call.
@@ -53,6 +66,37 @@ export function cropImage(sourceDataUrl, { top_percent, left_percent, width_perc
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
       resolve(canvas.toDataURL('image/jpeg', 0.92));
+    };
+    img.src = sourceDataUrl;
+  });
+}
+
+// Crops a rectangular region (given as percentages of the photo, same
+// shape the block-tagging screens already use) out of a data URL, then
+// downscales the result the same way fileToDataUrl does. This is what
+// backs the "Adjust Photo" crop step shown right after a photo is
+// picked, so the saved copy is both cropped to what the user framed
+// and IndexedDB-friendly in size.
+export function cropDataUrl(sourceDataUrl, { top_percent, left_percent, width_percent, height_percent }, maxDimension = 1600, quality = 0.9) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = () => reject(new Error('Could not read that image file.'));
+    img.onload = () => {
+      const cropX = (left_percent / 100) * img.width;
+      const cropY = (top_percent / 100) * img.height;
+      const cropW = (width_percent / 100) * img.width;
+      const cropH = (height_percent / 100) * img.height;
+
+      const scale = Math.min(1, maxDimension / Math.max(cropW, cropH));
+      const outW = Math.max(1, Math.round(cropW * scale));
+      const outH = Math.max(1, Math.round(cropH * scale));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, outW, outH);
+      resolve(canvas.toDataURL('image/jpeg', quality));
     };
     img.src = sourceDataUrl;
   });
