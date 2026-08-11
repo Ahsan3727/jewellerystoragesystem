@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { addArticle, createPhoto, getArticlesForImage, getGoldRate } from '../db';
-import { fileToDataUrl } from '../imageUtils';
+import { readFileAsDataUrl } from '../imageUtils';
 import { computePrice, getGoldWeight, formatPKR, formatGrams } from '../priceUtils';
+import ImageCropModal from '../components/ImageCropModal';
 
 export const CATEGORIES = ['Ring', 'Necklace', 'Bangle', 'Earring', 'Chain', 'Bracelet', 'Set', 'Other'];
 
@@ -13,6 +14,7 @@ export default function ArticleTagger() {
   const [imageUri, setImageUri] = useState(null);
   const [imageId, setImageId] = useState(null); // stable id per source photo — groups every block on this photo
   const [tags, setTags] = useState([]);
+  const [pendingPhoto, setPendingPhoto] = useState(null); // raw data URL awaiting the crop-adjustment step
   const [pendingTag, setPendingTag] = useState(null); // {top_percent, left_percent}
   const [form, setForm] = useState(emptyForm);
   const [toast, setToast] = useState(null);
@@ -31,12 +33,23 @@ export default function ArticleTagger() {
       setToast('Please choose an image file.');
       return;
     }
-    const dataUrl = await fileToDataUrl(file);
+    try {
+      const rawDataUrl = await readFileAsDataUrl(file);
+      setPendingPhoto(rawDataUrl); // opens the Adjust Photo crop step; saving happens once that's confirmed
+    } catch (err) {
+      setToast(err.message || 'Could not read that image file.');
+    }
+  };
+
+  // Called once the crop-adjustment modal is confirmed — this is what
+  // actually registers the photo and starts a fresh tagging session.
+  const finishPhotoCrop = async (croppedDataUrl) => {
     const newImageId = Date.now();
-    await createPhoto(newImageId, dataUrl); // registers it in the shared photos store right away
-    setImageUri(dataUrl);
+    await createPhoto(newImageId, croppedDataUrl); // registers it in the shared photos store right away
+    setImageUri(croppedDataUrl);
     setImageId(newImageId);
     setTags([]);
+    setPendingPhoto(null);
   };
 
   const onUploadChange = async (e) => {
@@ -235,6 +248,14 @@ export default function ArticleTagger() {
             </div>
           </div>
         </div>
+      )}
+
+      {pendingPhoto && (
+        <ImageCropModal
+          sourceDataUrl={pendingPhoto}
+          onCancel={() => setPendingPhoto(null)}
+          onConfirm={finishPhotoCrop}
+        />
       )}
 
       {toast && <div className="toast">{toast}</div>}

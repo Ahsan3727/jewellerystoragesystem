@@ -43,7 +43,8 @@ import {
 } from '../db';
 import { CATEGORIES } from './ArticleTagger';
 import { computePrice, getDisplayPrice, getGoldWeight, formatPKR, formatGrams } from '../priceUtils';
-import { fileToDataUrl } from '../imageUtils';
+import { readFileAsDataUrl } from '../imageUtils';
+import ImageCropModal from '../components/ImageCropModal';
 
 const emptyForm = { name: '', category: CATEGORIES[0], weight_grams: '', stone_weight_grams: '', description: '' };
 const MIN_BLOCK_PERCENT = 4;
@@ -142,6 +143,7 @@ function BlockBoard({ imageId }) {
   const [toast, setToast] = useState(null); // { message, undo? }
   const [rate, setRate] = useState(0);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [pendingPhoto, setPendingPhoto] = useState(null); // raw data URL awaiting the crop-adjustment step
   const imgRef = useRef(null);
   const dragInfo = useRef(null);
   const pendingDeleteRef = useRef(null); // { id, timer }
@@ -450,10 +452,22 @@ function BlockBoard({ imageId }) {
     setAddMode(false);
     setPendingTag(null);
     setSelectedId(null);
+    try {
+      const rawDataUrl = await readFileAsDataUrl(file);
+      setPendingPhoto(rawDataUrl); // opens the Adjust Photo crop step; replacePhoto happens once that's confirmed
+    } catch (err) {
+      setToast({ message: err.message || 'Could not read that image file.' });
+    }
+  };
+
+  // Called once the crop-adjustment modal is confirmed — this is what
+  // actually swaps the photo in. Block positions/sizes are untouched;
+  // the old photo is kept in photo_history, same as before.
+  const finishPhotoCrop = async (croppedDataUrl) => {
+    setPendingPhoto(null);
     setPhotoBusy(true);
     try {
-      const dataUrl = await fileToDataUrl(file);
-      await replacePhoto(imageId, dataUrl);
+      await replacePhoto(imageId, croppedDataUrl);
       await load();
       setToast({ message: 'Photo updated — the previous one was saved below.' });
     } catch (err) {
@@ -797,6 +811,14 @@ function BlockBoard({ imageId }) {
             </div>
           </div>
         </div>
+      )}
+
+      {pendingPhoto && (
+        <ImageCropModal
+          sourceDataUrl={pendingPhoto}
+          onCancel={() => setPendingPhoto(null)}
+          onConfirm={finishPhotoCrop}
+        />
       )}
 
       {toast && (
