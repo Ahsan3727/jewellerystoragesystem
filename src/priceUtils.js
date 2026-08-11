@@ -20,6 +20,22 @@ export function computePrice(weightGrams, ratePerTola) {
   return Math.round((w / GRAMS_PER_TOLA) * r);
 }
 
+// The weight that actually gets priced as gold.
+//
+// A piece's total weight_grams is whatever it reads on the scale —
+// gold *and* any stones set into it together. Stones aren't gold, so
+// pricing the full scale weight at the gold rate overstates every
+// stone-set piece. stone_weight_grams (optional, defaults to 0 for
+// pieces with no stones / saved before this field existed) is
+// subtracted out first so only the actual gold gets priced. Clamped
+// at 0 so a stone weight mistakenly entered larger than the total
+// weight can't flip the price negative.
+export function getGoldWeight(weightGrams, stoneWeightGrams) {
+  const w = Number(weightGrams) || 0;
+  const s = Number(stoneWeightGrams) || 0;
+  return Math.max(0, w - s);
+}
+
 // The price to actually show for an article, anywhere in the app.
 //
 // In-stock pieces float with the market — always priced off today's
@@ -38,13 +54,14 @@ export function computePrice(weightGrams, ratePerTola) {
 // saved before this was tracked (no sold_price / sold_rate_per_tola on
 // the record yet).
 export function getDisplayPrice(article, liveRatePerTola) {
+  const goldWeight = getGoldWeight(article?.weight_grams, article?.stone_weight_grams);
   if (article && article.status === 'sold') {
     if (article.sold_price != null) return article.sold_price;
     if (article.sold_rate_per_tola != null) {
-      return computePrice(article.weight_grams, article.sold_rate_per_tola);
+      return computePrice(goldWeight, article.sold_rate_per_tola);
     }
   }
-  return computePrice(article?.weight_grams, liveRatePerTola);
+  return computePrice(goldWeight, liveRatePerTola);
 }
 
 // Rs 123,456 style formatting for PKR, no decimals (shop pricing is
