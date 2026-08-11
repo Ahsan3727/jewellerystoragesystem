@@ -12,7 +12,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getArticles, getArticleStats, getGoldRate } from '../db';
-import { computePrice, getDisplayPrice, formatPKR, formatGrams } from '../priceUtils';
+import { computePrice, getDisplayPrice, getGoldWeight, formatPKR, formatGrams } from '../priceUtils';
 import { summarizeRange, todayStart } from '../salesUtils';
 
 export default function Dashboard() {
@@ -35,9 +35,17 @@ export default function Dashboard() {
       for (const a of all) {
         if (a.status === 'sold') continue; // breakdown reflects what's on the floor right now
         const cat = a.category || 'Other';
-        const entry = byCategory.get(cat) || { category: cat, count: 0, weight: 0 };
+        const entry = byCategory.get(cat) || { category: cat, count: 0, weight: 0, goldWeight: 0 };
         entry.count += 1;
+        // weight: what the scale actually reads (gold + any stones).
         entry.weight += Number(a.weight_grams) || 0;
+        // goldWeight: stone_weight_grams subtracted out — the part of
+        // this category that's actually gold, and so the only part
+        // that should ever be priced at the gold rate. See
+        // priceUtils.getGoldWeight for the shared deduction logic used
+        // everywhere else in the app (Stock Value above, Sales, the
+        // article list, etc.) so this bar's value line matches them.
+        entry.goldWeight += getGoldWeight(a.weight_grams, a.stone_weight_grams);
         byCategory.set(cat, entry);
       }
       setBreakdown(Array.from(byCategory.values()).sort((a, b) => b.weight - a.weight));
@@ -116,22 +124,31 @@ export default function Dashboard() {
         <section className="panel">
           <h2 className="panel-title">In Stock, By Category</h2>
           <div className="category-bars">
-            {breakdown.map((b) => (
-              <div className="category-bar-row" key={b.category}>
-                <div className="category-bar-head">
-                  <span>{b.category}</span>
-                  <span className="category-bar-meta">
-                    {b.count} · {formatGrams(b.weight)}
-                  </span>
+            {breakdown.map((b) => {
+              const hasStones = b.goldWeight < b.weight;
+              // Same computePrice() the rest of the app uses, fed the
+              // stone-deducted weight — so this figure always matches
+              // what these pieces would actually total on Stock Value.
+              const categoryValue = computePrice(b.goldWeight, rate.rate);
+              return (
+                <div className="category-bar-row" key={b.category}>
+                  <div className="category-bar-head">
+                    <span>{b.category}</span>
+                    <span className="category-bar-meta">
+                      {b.count} · {formatGrams(b.weight)}
+                      {hasStones ? ` (${formatGrams(b.goldWeight)} gold)` : ''}
+                    </span>
+                  </div>
+                  <div className="category-bar-track">
+                    <div
+                      className="category-bar-fill"
+                      style={{ width: `${maxWeight ? (b.weight / maxWeight) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <div className="category-bar-value">{formatPKR(categoryValue)}</div>
                 </div>
-                <div className="category-bar-track">
-                  <div
-                    className="category-bar-fill"
-                    style={{ width: `${maxWeight ? (b.weight / maxWeight) * 100 : 0}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
