@@ -1083,6 +1083,80 @@ label.field-label {
   font-size: 16px;
 }
 
+.stat-sub {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gold);
+  margin-top: 4px;
+}
+
+.rate-ticker-sales {
+  background: linear-gradient(135deg, rgba(95, 181, 131, 0.16), rgba(95, 181, 131, 0.04));
+  border-color: var(--success);
+}
+
+.rate-ticker-sales .rate-ticker-value,
+.rate-ticker-sales .rate-ticker-edit {
+  color: var(--success);
+}
+
+/* ---- Sales screen: daily/weekly/monthly sale record ---- */
+
+.sales-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sales-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-bottom: 6px;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.sales-group-label {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.sales-group-caret {
+  color: var(--text-muted);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.sales-group-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.sales-group-meta strong {
+  color: var(--gold);
+  font-family: var(--font-display);
+  font-size: 13px;
+}
+
+.sales-group-items {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .rate-warning {
   background: var(--gold-soft);
   border: 1px solid var(--gold);
@@ -1131,6 +1205,15 @@ label.field-label {
   font-family: var(--font-display);
   font-size: 20px;
   font-weight: 700;
+}
+
+.price-preview-sold {
+  border-style: solid;
+  border-color: var(--success);
+}
+
+.price-preview-sold strong {
+  color: var(--success);
 }
 
 .rate-input {

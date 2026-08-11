@@ -26,6 +26,8 @@
 // v3 adds "photos" / "photo_history" and backfills "photos" from
 // whatever image_uri each existing article was already carrying.
 
+import { computePrice } from './priceUtils';
+
 const DB_NAME = 'jewelry_business';
 const DB_VERSION = 3;
 const GOLD_RATE_KEY = 'gold_rate_per_tola';
@@ -210,6 +212,8 @@ export async function addArticle(article) {
     export_uri: null,
     status: article.status === 'sold' ? 'sold' : 'in_stock',
     sold_at: article.status === 'sold' ? new Date().toISOString() : null,
+    sold_rate_per_tola: null,
+    sold_price: null,
     created_at: new Date().toISOString(),
   };
   return promisify(store.add(row));
@@ -289,18 +293,69 @@ export async function setExportUri(id, export_uri) {
 // dashboard's in-stock weight/value totals and render dimmed on the
 // photo board, so a shop owner can tell what's still available to sell
 // at a glance without losing the record of what moved.
+//
+// The moment a piece is marked sold, this also locks in *how* it was
+// priced: today's gold rate (sold_rate_per_tola) and the resulting
+// price (sold_price = weight × that rate, via the same computePrice()
+// every other screen uses). That snapshot is what the Sales screen and
+// every "sold" price display read from afterwards, instead of
+// recalculating off whatever the gold rate happens to be today — so a
+// sale's recorded value stays put even after the rate moves. Restocking
+// clears the snapshot; if it's marked sold again later, it gets priced
+// fresh at that day's rate.
 export async function setArticleStatus(id, status) {
   const database = await getDb();
-  const store = tx(database, 'articles', 'readwrite');
-  const existing = await promisify(store.get(id));
+  const transaction = database.transaction(['articles', 'settings'], 'readwrite');
+  const articleStore = transaction.objectStore('articles');
+  const settingsStore = transaction.objectStore('settings');
+
+  const done = new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error || new Error('Could not update that article.'));
+  });
+
+  const existing = await promisify(articleStore.get(id));
   if (!existing) return;
-  const updated = {
-    ...existing,
-    status: status === 'sold' ? 'sold' : 'in_stock',
-    sold_at: status === 'sold' ? new Date().toISOString() : null,
-  };
-  await promisify(store.put(updated));
+
+  let updated;
+  if (status === 'sold') {
+    const rateRow = await promisify(settingsStore.get(GOLD_RATE_KEY));
+    const ratePerTola = rateRow ? Number(rateRow.value) || 0 : 0;
+    updated = {
+      ...existing,
+      status: 'sold',
+      sold_at: new Date().toISOString(),
+      sold_rate_per_tola: ratePerTola,
+      sold_price: computePrice(existing.weight_grams, ratePerTola),
+    };
+  } else {
+    updated = {
+      ...existing,
+      status: 'in_stock',
+      sold_at: null,
+      sold_rate_per_tola: null,
+      sold_price: null,
+    };
+  }
+  articleStore.put(updated);
+
+  await done;
   return updated;
+}
+
+// Every sold article, most-recently-sold first — the raw material for
+// the Sales screen's daily/weekly/monthly breakdowns. Kept as its own
+// query (rather than making every caller of getArticles() filter it
+// out) since "what sold, and when" is a different question from "what's
+// in the catalog".
+export async function getSoldArticles() {
+  const database = await getDb();
+  const store = tx(database, 'articles', 'readonly');
+  const all = await promisify(store.getAll());
+  return all
+    .filter((a) => a.status === 'sold' && a.sold_at)
+    .sort((a, b) => (a.sold_at < b.sold_at ? 1 : -1));
 }
 
 // Clones an article — same photo, category, weight, description — as a
@@ -320,6 +375,8 @@ export async function duplicateArticle(id) {
     name: `${existing.name} (Copy)`,
     status: 'in_stock',
     sold_at: null,
+    sold_rate_per_tola: null,
+    sold_price: null,
     export_uri: null,
     created_at: new Date().toISOString(),
     left_percent: Math.min(100 - width, (rest.left_percent || 0) + 4),

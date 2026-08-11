@@ -20,6 +20,33 @@ export function computePrice(weightGrams, ratePerTola) {
   return Math.round((w / GRAMS_PER_TOLA) * r);
 }
 
+// The price to actually show for an article, anywhere in the app.
+//
+// In-stock pieces float with the market — always priced off today's
+// live gold rate, same as computePrice() above.
+//
+// Sold pieces are different: once a piece is gone, its sale price
+// shouldn't keep changing just because today's gold rate moved. So a
+// sold article's price is locked to whatever weight × the gold rate
+// was on the day it was actually marked sold (setArticleStatus() in
+// db.js stores that rate + the resulting price at the moment of sale).
+// This is what makes daily/weekly/monthly sales totals stable —
+// yesterday's sales stay yesterday's numbers even if you update the
+// rate today.
+//
+// `liveRatePerTola` is only used as a fallback, for sold articles
+// saved before this was tracked (no sold_price / sold_rate_per_tola on
+// the record yet).
+export function getDisplayPrice(article, liveRatePerTola) {
+  if (article && article.status === 'sold') {
+    if (article.sold_price != null) return article.sold_price;
+    if (article.sold_rate_per_tola != null) {
+      return computePrice(article.weight_grams, article.sold_rate_per_tola);
+    }
+  }
+  return computePrice(article?.weight_grams, liveRatePerTola);
+}
+
 // Rs 123,456 style formatting for PKR, no decimals (shop pricing is
 // always whole rupees).
 export function formatPKR(amount) {

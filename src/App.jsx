@@ -10,6 +10,7 @@ import ArticleList from './pages/ArticleList';
 import ImageBoard from './pages/ImageBoard';
 import ArticleForm from './pages/ArticleForm';
 import GoldRate from './pages/GoldRate';
+import Sales from './pages/Sales';
 import Settings from './pages/Settings';
 
 // Every "top level" screen — reachable directly from the sidebar/bottom
@@ -22,6 +23,7 @@ const TITLES = {
   '/inventory/list': 'Inventory',
   '/inventory/board': 'Inventory · By Photo',
   '/rate': 'Gold Rate',
+  '/sales': 'Sales',
   '/settings': 'Settings',
 };
 
@@ -78,6 +80,7 @@ export default function App() {
 
         <Route path="/articles/:id" element={<ArticleForm />} />
         <Route path="/rate" element={<GoldRate />} />
+        <Route path="/sales" element={<Sales />} />
         <Route path="/settings" element={<Settings />} />
       </Routes>
     </AppShell>
