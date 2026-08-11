@@ -7,11 +7,18 @@
 // stray background cropped out, tilted framing fixed — before they
 // become the article/board photo.
 //
-// Pure canvas + pointer events, no cropping library: same drag/resize
-// approach BlockBoard already uses for photo blocks, just applied to a
-// single rectangle instead of many.
+// The stage is sized in JS to exactly match the photo's own aspect
+// ratio (object-fit: contain, computed by hand) instead of leaving a
+// letterboxed image inside a taller fixed box. That matters on
+// mobile: with a fixed-height box + CSS object-fit, the visible image
+// is smaller than the box and offset inside it, so any rounding
+// mismatch between that offset and where the crop math thinks the
+// image starts makes the crop preview look shifted/zoomed into the
+// wrong region. Sizing the box itself to the image removes the
+// offset entirely — the stage's bounding rect IS the image's bounding
+// rect, so drag math and what's on screen can't drift apart.
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { cropDataUrl } from '../imageUtils';
 
 const MIN_CROP_PERCENT = 10;
@@ -23,6 +30,8 @@ const ASPECTS = [
   { label: '3:4', value: 3 / 4 },
 ];
 const DEFAULT_CROP = { top: 10, left: 10, width: 80, height: 80 };
+const MAX_STAGE_HEIGHT = 460;
+const MAX_STAGE_HEIGHT_VH = 0.55; // of the viewport, whichever is smaller
 
 function clamp(value, min, max) {
   if (max < min) max = min;
@@ -30,9 +39,12 @@ function clamp(value, min, max) {
 }
 
 // Largest box at the given aspect ratio that fits within 80% of the
-// photo, centered — used whenever an aspect preset is tapped.
+// photo, centered — used whenever an aspect preset is tapped. Works in
+// real stage pixels (renderedW/renderedH) so the ratio is exact
+// regardless of the image's own aspect ratio, then converts back to
+// percent for storage/rendering.
 function rectForAspect(aspect, renderedW, renderedH) {
-  if (!aspect) return DEFAULT_CROP;
+  if (!aspect || !renderedW || !renderedH) return DEFAULT_CROP;
   const boxW = renderedW * 0.8;
   const boxH = renderedH * 0.8;
   let w = boxW;
@@ -50,32 +62,61 @@ export default function ImageCropModal({ sourceDataUrl, onCancel, onConfirm }) {
   const [crop, setCrop] = useState(DEFAULT_CROP);
   const [aspect, setAspect] = useState(null);
   const [ready, setReady] = useState(false);
+  const [stageSize, setStageSize] = useState(null); // { width, height } in px — exact rendered image size
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const imgRef = useRef(null);
+  const stageWrapRef = useRef(null);
   const stageRef = useRef(null);
   const dragInfo = useRef(null);
 
-  // Same letterbox math the tag/board screens use: maps the rendered
-  // (object-fit: contain) image box, ignoring the padding around it.
-  const getMetrics = () => {
+  const computeStageSize = () => {
+    const wrap = stageWrapRef.current;
     const img = imgRef.current;
-    const stage = stageRef.current;
-    if (!img || !stage || !img.naturalWidth) return null;
-    const box = stage.getBoundingClientRect();
-    const scale = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
-    const renderedW = img.naturalWidth * scale;
-    const renderedH = img.naturalHeight * scale;
-    return { renderedW, renderedH };
+    if (!wrap || !img || !img.naturalWidth) return;
+    const maxW = wrap.clientWidth;
+    const maxH = Math.min(MAX_STAGE_HEIGHT, window.innerHeight * MAX_STAGE_HEIGHT_VH);
+    const ratio = img.naturalWidth / img.naturalHeight;
+    let w = maxW;
+    let h = w / ratio;
+    if (h > maxH) {
+      h = maxH;
+      w = h * ratio;
+    }
+    setStageSize({ width: Math.round(w), height: Math.round(h) });
   };
 
-  const onImageLoad = () => setReady(true);
+  const onImageLoad = () => {
+    setReady(true);
+    // Run after paint so wrap.clientWidth reflects the final layout.
+    requestAnimationFrame(computeStageSize);
+  };
+
+  useEffect(() => {
+    if (!ready) return;
+    const onResize = () => computeStageSize();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, [ready]);
+
+  // With the stage sized exactly to the image, its own bounding rect
+  // is the image's rendered box — no letterbox offset to account for.
+  const getMetrics = () => {
+    if (!stageSize) return null;
+    return { renderedW: stageSize.width, renderedH: stageSize.height };
+  };
 
   const applyAspect = (value) => {
     setAspect(value);
-    const m = getMetrics();
-    if (!m) return;
-    setCrop(rectForAspect(value, m.renderedW, m.renderedH));
+    if (!value || !stageSize) {
+      setCrop(DEFAULT_CROP);
+      return;
+    }
+    setCrop(rectForAspect(value, stageSize.width, stageSize.height));
   };
 
   const reset = () => {
@@ -138,8 +179,8 @@ export default function ImageCropModal({ sourceDataUrl, onCancel, onConfirm }) {
     let height = d.startHeight;
     if (aspect) {
       // Derive height from the new width so the box keeps the locked
-      // ratio. Safe to mix percent-of-width with percent-of-height like
-      // this because object-fit: contain scales both axes equally.
+      // ratio. renderedW/renderedH are the stage's exact pixel size
+      // (== the image's), so this maps 1:1 to real image pixels.
       const heightPx = ((width / 100) * d.renderedW) / aspect;
       height = clamp((heightPx / d.renderedH) * 100, MIN_CROP_PERCENT, 100);
       if (touchesTop) {
@@ -208,32 +249,54 @@ export default function ImageCropModal({ sourceDataUrl, onCancel, onConfirm }) {
           ))}
         </div>
 
-        <div className="crop-stage" ref={stageRef}>
-          <img ref={imgRef} src={sourceDataUrl} alt="" onLoad={onImageLoad} draggable={false} />
-          {ready && (
+        <div className="crop-stage-wrap" ref={stageWrapRef}>
+          {/* Kept off-screen (not display:none, so it still loads/measures)
+              until we know its real size, to avoid a flash of the old
+              letterboxed layout. */}
+          <img
+            ref={imgRef}
+            src={sourceDataUrl}
+            alt=""
+            onLoad={onImageLoad}
+            draggable={false}
+            style={{ display: 'none' }}
+          />
+          {ready && stageSize && (
             <div
-              className="crop-rect"
-              style={{
-                top: `${crop.top}%`,
-                left: `${crop.left}%`,
-                width: `${crop.width}%`,
-                height: `${crop.height}%`,
-              }}
-              onPointerDown={(e) => startDrag(e, 'move')}
-              onPointerMove={onDragMove}
-              onPointerUp={onDragEnd}
-              onPointerCancel={onDragEnd}
+              className="crop-stage"
+              ref={stageRef}
+              style={{ width: stageSize.width, height: stageSize.height }}
             >
-              {CORNERS.map((corner) => (
-                <span
-                  key={corner}
-                  className={`resize-handle ${corner}`}
-                  onPointerDown={(e) => startDrag(e, 'resize', corner)}
-                  onPointerMove={onDragMove}
-                  onPointerUp={onDragEnd}
-                  onPointerCancel={onDragEnd}
-                />
-              ))}
+              <img src={sourceDataUrl} alt="" draggable={false} />
+              <div
+                className="crop-rect"
+                style={{
+                  top: `${crop.top}%`,
+                  left: `${crop.left}%`,
+                  width: `${crop.width}%`,
+                  height: `${crop.height}%`,
+                }}
+                onPointerDown={(e) => startDrag(e, 'move')}
+                onPointerMove={onDragMove}
+                onPointerUp={onDragEnd}
+                onPointerCancel={onDragEnd}
+              >
+                {CORNERS.map((corner) => (
+                  <span
+                    key={corner}
+                    className={`resize-handle ${corner}`}
+                    onPointerDown={(e) => startDrag(e, 'resize', corner)}
+                    onPointerMove={onDragMove}
+                    onPointerUp={onDragEnd}
+                    onPointerCancel={onDragEnd}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {!(ready && stageSize) && (
+            <div className="crop-stage crop-stage-loading">
+              <span className="empty-state">Loading photo…</span>
             </div>
           )}
         </div>
