@@ -16,7 +16,7 @@ import { computePrice, formatPKR, formatGrams } from '../priceUtils';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [stats, setStats] = useState({ total: 0, totalWeight: 0 });
+  const [stats, setStats] = useState({ inStockCount: 0, inStockWeight: 0, soldCount: 0 });
   const [rate, setRate] = useState({ rate: 0, updated_at: null });
   const [breakdown, setBreakdown] = useState([]);
   const [recent, setRecent] = useState([]);
@@ -30,6 +30,7 @@ export default function Dashboard() {
 
       const byCategory = new Map();
       for (const a of all) {
+        if (a.status === 'sold') continue; // breakdown reflects what's on the floor right now
         const cat = a.category || 'Other';
         const entry = byCategory.get(cat) || { category: cat, count: 0, weight: 0 };
         entry.count += 1;
@@ -41,7 +42,7 @@ export default function Dashboard() {
     });
   }, []);
 
-  const totalValue = computePrice(stats.totalWeight, rate.rate);
+  const inStockValue = computePrice(stats.inStockWeight, rate.rate);
   const maxWeight = breakdown.length ? Math.max(...breakdown.map((b) => b.weight)) : 0;
 
   return (
@@ -57,9 +58,10 @@ export default function Dashboard() {
       </button>
 
       <div className="stats-row">
-        <StatCard label="Articles" value={stats.total} />
-        <StatCard label="Total Weight" value={formatGrams(stats.totalWeight)} small />
-        <StatCard label="Inventory Value" value={formatPKR(totalValue)} small />
+        <StatCard label="In Stock" value={stats.inStockCount} />
+        <StatCard label="Stock Weight" value={formatGrams(stats.inStockWeight)} small />
+        <StatCard label="Stock Value" value={formatPKR(inStockValue)} small />
+        <StatCard label="Sold" value={stats.soldCount} accent="muted" />
       </div>
 
       <div className="quick-actions">
@@ -87,7 +89,7 @@ export default function Dashboard() {
 
       {breakdown.length > 0 && (
         <section className="panel">
-          <h2 className="panel-title">By Category</h2>
+          <h2 className="panel-title">In Stock, By Category</h2>
           <div className="category-bars">
             {breakdown.map((b) => (
               <div className="category-bar-row" key={b.category}>
@@ -128,6 +130,7 @@ export default function Dashboard() {
               <div className="row-info">
                 <div className="row-name">
                   {item.name} <span className="cat-tag">{item.category}</span>
+                  {item.status === 'sold' && <span className="sold-badge">Sold</span>}
                 </div>
                 <div className="row-meta">
                   {formatGrams(item.weight_grams)} · {formatPKR(computePrice(item.weight_grams, rate.rate))}
@@ -141,10 +144,13 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ label, value, small }) {
+function StatCard({ label, value, small, accent }) {
+  const valueClass = ['stat-value', small && 'stat-value-small', accent === 'muted' && 'stat-value-muted']
+    .filter(Boolean)
+    .join(' ');
   return (
     <div className="stat-card">
-      <div className={small ? 'stat-value stat-value-small' : 'stat-value'}>{value}</div>
+      <div className={valueClass}>{value}</div>
       <div className="stat-label">{label}</div>
     </div>
   );

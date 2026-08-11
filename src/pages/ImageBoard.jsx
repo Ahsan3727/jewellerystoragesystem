@@ -1,17 +1,24 @@
 // src/pages/ImageBoard.jsx
 //
-// "View" page for tagged photos. Two views live in this one file:
-//   - PhotoGallery  (/view)        — every photo that has at least one
-//                                    tagged block, grouped by image_id.
-//   - BlockBoard    (/view/:id)    — one photo with all its blocks drawn
-//                                    on top, each labeled with the
-//                                    article's category + name. Blocks
-//                                    can be dragged to move, resized with
-//                                    the gold handle, or removed. The
-//                                    "Create Block" button drops a new
-//                                    block wherever you tap next and
-//                                    opens the same New Article form used
-//                                    on the Tag screen.
+// "Inventory · By Photo" — two views live in this one file:
+//   - PhotoGallery  (/inventory/board)        — every photo that has at
+//                                                least one tagged block,
+//                                                grouped by image_id.
+//   - BlockBoard    (/inventory/board/:id)     — one photo with all its
+//                                                blocks drawn on top,
+//                                                each labeled with the
+//                                                article's category +
+//                                                name.
+//
+// Each block can be:
+//   - dragged to move
+//   - resized from any of its 4 corners (drag the corner you want to
+//     move — the opposite corner stays anchored), not just the one
+//     bottom-right handle it used to have
+//   - marked sold / back in stock with a single tap
+//   - duplicated, for a near-identical piece
+//   - removed — instantly, with a 5-second "Undo" toast instead of a
+//     confirm dialog
 //
 // Sizes/positions are stored as percentages of the photo (top_percent,
 // left_percent, width_percent, height_percent) — same fields the Tag
@@ -26,6 +33,8 @@ import {
   updateArticle,
   updateArticleBlock,
   deleteArticle,
+  duplicateArticle,
+  setArticleStatus,
   getGoldRate,
   getPhoto,
   getPhotoHistory,
@@ -38,6 +47,8 @@ import { fileToDataUrl } from '../imageUtils';
 
 const emptyForm = { name: '', category: CATEGORIES[0], weight_grams: '', description: '' };
 const MIN_BLOCK_PERCENT = 4;
+const UNDO_DELAY_MS = 5000;
+const CORNERS = ['nw', 'ne', 'sw', 'se'];
 
 function clamp(value, min, max) {
   if (max < min) max = min;
@@ -66,11 +77,13 @@ function PhotoGallery() {
             image_id: a.image_id,
             thumb: a.export_uri || a.image_uri,
             count: 0,
+            soldCount: 0,
             names: [],
           });
         }
         const g = byImage.get(a.image_id);
         g.count += 1;
+        if (a.status === 'sold') g.soldCount += 1;
         if (g.names.length < 3) g.names.push(a.name);
       }
       setGroups(Array.from(byImage.values()));
@@ -99,6 +112,7 @@ function PhotoGallery() {
             <div className="photo-gallery-info">
               <strong>
                 {g.count} block{g.count === 1 ? '' : 's'}
+                {g.soldCount > 0 && <span className="photo-gallery-sold"> · {g.soldCount} sold</span>}
               </strong>
               <span>
                 {g.names.join(', ')}
@@ -125,11 +139,12 @@ function BlockBoard({ imageId }) {
   const [pendingTag, setPendingTag] = useState(null); // {top_percent, left_percent}
   const [form, setForm] = useState(emptyForm);
   const [editForm, setEditForm] = useState(null); // {name, category, weight_grams, description} for the selected block
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useState(null); // { message, undo? }
   const [rate, setRate] = useState(0);
   const [photoBusy, setPhotoBusy] = useState(false);
   const imgRef = useRef(null);
   const dragInfo = useRef(null);
+  const pendingDeleteRef = useRef(null); // { id, timer }
   const photoInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
@@ -154,10 +169,21 @@ function BlockBoard({ imageId }) {
   }, []);
 
   useEffect(() => {
-    if (!toast) return;
+    if (!toast || toast.undo) return; // undo toasts clear themselves on their own timer
     const t = setTimeout(() => setToast(null), 2400);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // If the screen unmounts (photo switched, navigated away) while a
+  // remove is still "undoable", commit it rather than leaving it in limbo.
+  useEffect(() => {
+    return () => {
+      if (pendingDeleteRef.current) {
+        clearTimeout(pendingDeleteRef.current.timer);
+        deleteArticle(pendingDeleteRef.current.id);
+      }
+    };
+  }, []);
 
   // "photos" is the source of truth now; fall back to an article's own
   // copy only if the photo row somehow hasn't loaded yet.
@@ -195,14 +221,18 @@ function BlockBoard({ imageId }) {
     setForm(emptyForm);
   };
 
-  const startDrag = (evt, block, mode) => {
+  // mode: 'move' | 'resize'. corner (resize only): 'nw' | 'ne' | 'sw' | 'se'
+  // — whichever corner's handle was grabbed; the opposite corner of the
+  // block stays anchored while that one moves.
+  const startDrag = (evt, block, mode, corner) => {
     if (addMode) return;
     evt.stopPropagation();
     evt.preventDefault();
     const m = getMetrics();
     if (!m) return;
     dragInfo.current = {
-      mode, // 'move' | 'resize'
+      mode,
+      corner,
       id: block.id,
       pointerId: evt.pointerId,
       startX: evt.clientX,
@@ -234,6 +264,7 @@ function BlockBoard({ imageId }) {
     setBlocks((prev) =>
       prev.map((b) => {
         if (b.id !== d.id) return b;
+
         if (d.mode === 'move') {
           const left = clamp(d.startLeft + dxPct, 0, 100 - b.width_percent);
           const top = clamp(d.startTop + dyPct, 0, 100 - b.height_percent);
@@ -241,11 +272,38 @@ function BlockBoard({ imageId }) {
           d.lastTop = top;
           return { ...b, left_percent: left, top_percent: top };
         }
-        const width = clamp(d.startWidth + dxPct, MIN_BLOCK_PERCENT, 100 - b.left_percent);
-        const height = clamp(d.startHeight + dyPct, MIN_BLOCK_PERCENT, 100 - b.top_percent);
+
+        // Resize: whichever edges the grabbed corner touches move;
+        // the opposite edges stay put, so the block resizes from that
+        // corner instead of always growing toward bottom-right.
+        const touchesLeft = d.corner === 'nw' || d.corner === 'sw';
+        const touchesTop = d.corner === 'nw' || d.corner === 'ne';
+
+        let left = d.startLeft;
+        let width = d.startWidth;
+        if (touchesLeft) {
+          const rightEdge = d.startLeft + d.startWidth;
+          left = clamp(d.startLeft + dxPct, 0, rightEdge - MIN_BLOCK_PERCENT);
+          width = rightEdge - left;
+        } else {
+          width = clamp(d.startWidth + dxPct, MIN_BLOCK_PERCENT, 100 - d.startLeft);
+        }
+
+        let top = d.startTop;
+        let height = d.startHeight;
+        if (touchesTop) {
+          const bottomEdge = d.startTop + d.startHeight;
+          top = clamp(d.startTop + dyPct, 0, bottomEdge - MIN_BLOCK_PERCENT);
+          height = bottomEdge - top;
+        } else {
+          height = clamp(d.startHeight + dyPct, MIN_BLOCK_PERCENT, 100 - d.startTop);
+        }
+
+        d.lastLeft = left;
+        d.lastTop = top;
         d.lastWidth = width;
         d.lastHeight = height;
-        return { ...b, width_percent: width, height_percent: height };
+        return { ...b, left_percent: left, top_percent: top, width_percent: width, height_percent: height };
       })
     );
   };
@@ -269,7 +327,7 @@ function BlockBoard({ imageId }) {
 
   const saveNewBlock = async () => {
     if (!form.name || !form.weight_grams) {
-      setToast('Name and weight are required.');
+      setToast({ message: 'Name and weight are required.' });
       return;
     }
     const newId = await addArticle({
@@ -288,15 +346,52 @@ function BlockBoard({ imageId }) {
     setPendingTag(null);
     setAddMode(false);
     setSelectedId(newId);
-    setToast(`"${form.name}" added — drag its gold handle to resize.`);
+    setToast({ message: `"${form.name}" added — drag a corner handle to resize.` });
   };
 
-  const removeSelected = async () => {
+  const removeSelected = () => {
     if (!selected) return;
-    if (!window.confirm(`Remove "${selected.name}" from this photo?`)) return;
-    await deleteArticle(selected.id);
+    const item = selected;
+    // A second removal while one is already pending commits the first
+    // immediately instead of silently dropping it.
+    if (pendingDeleteRef.current) {
+      clearTimeout(pendingDeleteRef.current.timer);
+      deleteArticle(pendingDeleteRef.current.id);
+    }
+    setBlocks((prev) => prev.filter((b) => b.id !== item.id));
     setSelectedId(null);
+    const timer = setTimeout(async () => {
+      await deleteArticle(item.id);
+      pendingDeleteRef.current = null;
+      setToast(null);
+    }, UNDO_DELAY_MS);
+    pendingDeleteRef.current = { id: item.id, timer };
+    setToast({ message: `Removed "${item.name}".`, undo: true });
+  };
+
+  const onUndoRemove = () => {
+    if (!pendingDeleteRef.current) return;
+    clearTimeout(pendingDeleteRef.current.timer);
+    pendingDeleteRef.current = null;
+    setToast(null);
     load();
+  };
+
+  const toggleSelectedStatus = async () => {
+    if (!selected) return;
+    const next = selected.status === 'sold' ? 'in_stock' : 'sold';
+    await setArticleStatus(selected.id, next);
+    await load();
+    setToast({ message: next === 'sold' ? 'Marked as sold.' : 'Back in stock.' });
+  };
+
+  const duplicateSelected = async () => {
+    if (!selected) return;
+    const name = selected.name;
+    const newId = await duplicateArticle(selected.id);
+    await load();
+    setSelectedId(newId);
+    setToast({ message: `Duplicated "${name}" — drag the copy into place.` });
   };
 
   // Opens the edit form pre-filled with the selected block's current
@@ -315,7 +410,7 @@ function BlockBoard({ imageId }) {
   const saveEditedBlock = async () => {
     if (!selected || !editForm) return;
     if (!editForm.name || !editForm.weight_grams) {
-      setToast('Name and weight are required.');
+      setToast({ message: 'Name and weight are required.' });
       return;
     }
     await updateArticle(selected.id, {
@@ -326,7 +421,7 @@ function BlockBoard({ imageId }) {
     });
     await load();
     setEditForm(null);
-    setToast(`"${editForm.name}" updated.`);
+    setToast({ message: `"${editForm.name}" updated.` });
   };
 
   // Swaps the photo under every block for a new one. Block positions
@@ -338,7 +433,7 @@ function BlockBoard({ imageId }) {
     evt.target.value = '';
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      setToast('Please choose an image file.');
+      setToast({ message: 'Please choose an image file.' });
       return;
     }
     if (
@@ -357,9 +452,9 @@ function BlockBoard({ imageId }) {
       const dataUrl = await fileToDataUrl(file);
       await replacePhoto(imageId, dataUrl);
       await load();
-      setToast('Photo updated — the previous one was saved below.');
+      setToast({ message: 'Photo updated — the previous one was saved below.' });
     } catch (err) {
-      setToast(err.message || 'Could not update the photo.');
+      setToast({ message: err.message || 'Could not update the photo.' });
     } finally {
       setPhotoBusy(false);
     }
@@ -375,9 +470,9 @@ function BlockBoard({ imageId }) {
     try {
       await restorePhoto(imageId, entry.id);
       await load();
-      setToast('Previous photo restored.');
+      setToast({ message: 'Previous photo restored.' });
     } catch (err) {
-      setToast(err.message || 'Could not restore that photo.');
+      setToast({ message: err.message || 'Could not restore that photo.' });
     } finally {
       setPhotoBusy(false);
     }
@@ -451,7 +546,9 @@ function BlockBoard({ imageId }) {
             {blocks.map((b) => (
               <div
                 key={b.id}
-                className={`photo-block ${selectedId === b.id ? 'selected' : ''}`}
+                className={`photo-block ${selectedId === b.id ? 'selected' : ''} ${
+                  b.status === 'sold' ? 'is-sold' : ''
+                }`}
                 style={{
                   top: `${b.top_percent}%`,
                   left: `${b.left_percent}%`,
@@ -465,16 +562,19 @@ function BlockBoard({ imageId }) {
               >
                 <span className="photo-block-label">
                   <span className="tag-marker-cat">{b.category}</span> {b.name}
+                  {b.status === 'sold' && <span className="photo-block-sold"> · Sold</span>}
                 </span>
-                {selectedId === b.id && (
-                  <span
-                    className="resize-handle"
-                    onPointerDown={(e) => startDrag(e, b, 'resize')}
-                    onPointerMove={onDragMove}
-                    onPointerUp={onDragEnd}
-                    onPointerCancel={onDragEnd}
-                  />
-                )}
+                {selectedId === b.id &&
+                  CORNERS.map((corner) => (
+                    <span
+                      key={corner}
+                      className={`resize-handle ${corner}`}
+                      onPointerDown={(e) => startDrag(e, b, 'resize', corner)}
+                      onPointerMove={onDragMove}
+                      onPointerUp={onDragEnd}
+                      onPointerCancel={onDragEnd}
+                    />
+                  ))}
               </div>
             ))}
           </div>
@@ -518,14 +618,24 @@ function BlockBoard({ imageId }) {
           <div className="row-meta">
             Block size: {Math.round(selected.width_percent)}% × {Math.round(selected.height_percent)}% of photo
           </div>
+          <button
+            className={`status-pill ${selected.status === 'sold' ? 'is-sold' : ''}`}
+            onClick={toggleSelectedStatus}
+            type="button"
+          >
+            {selected.status === 'sold' ? '✓ Sold — tap to restock' : 'Mark as Sold'}
+          </button>
           <p className="hint" style={{ marginTop: 6 }}>
-            Drag the block to move it, or its gold handle to resize it.
+            Drag the block to move it, or any corner handle to resize it.
           </p>
-          <div className="modal-actions" style={{ justifyContent: 'space-between' }}>
+          <div className="modal-actions" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
             <button className="link-btn link-delete" onClick={removeSelected}>
               Remove block
             </button>
-            <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button className="link-btn link-duplicate" onClick={duplicateSelected}>
+                Duplicate
+              </button>
               <button className="link-btn link-edit" onClick={startEditSelected}>
                 Edit details
               </button>
@@ -655,7 +765,16 @@ function BlockBoard({ imageId }) {
         </div>
       )}
 
-      {toast && <div className="toast">{toast}</div>}
+      {toast && (
+        <div className="toast">
+          <span>{toast.message}</span>
+          {toast.undo && (
+            <button className="toast-undo-btn" onClick={onUndoRemove} type="button">
+              Undo
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

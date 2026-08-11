@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getArticle, updateArticle, getGoldRate } from '../db';
+import { getArticle, updateArticle, getGoldRate, setArticleStatus, duplicateArticle } from '../db';
 import { computePrice, formatPKR } from '../priceUtils';
 import { CATEGORIES } from './ArticleTagger';
 
@@ -8,9 +8,11 @@ export default function ArticleForm() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [form, setForm] = useState(null);
+  const [status, setStatus] = useState('in_stock');
   const [image, setImage] = useState(null);
   const [rate, setRate] = useState(0);
   const [error, setError] = useState(null);
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     getArticle(Number(id)).then((article) => {
@@ -24,10 +26,17 @@ export default function ArticleForm() {
         weight_grams: String(article.weight_grams ?? ''),
         description: article.description || '',
       });
+      setStatus(article.status === 'sold' ? 'sold' : 'in_stock');
       setImage(article.export_uri || article.image_uri);
     });
     getGoldRate().then((r) => setRate(r.rate));
   }, [id]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2400);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const save = async () => {
     if (!form.name || !form.weight_grams) {
@@ -36,6 +45,18 @@ export default function ArticleForm() {
     }
     await updateArticle(Number(id), form);
     navigate(-1);
+  };
+
+  const toggleStatus = async () => {
+    const next = status === 'sold' ? 'in_stock' : 'sold';
+    await setArticleStatus(Number(id), next);
+    setStatus(next);
+    setToast(next === 'sold' ? 'Marked as sold.' : 'Back in stock.');
+  };
+
+  const duplicate = async () => {
+    await duplicateArticle(Number(id));
+    setToast('Duplicated — find the copy in Inventory.');
   };
 
   if (error) return <p className="empty">{error}</p>;
@@ -50,6 +71,10 @@ export default function ArticleForm() {
           <img src={image} alt={form.name} />
         </div>
       )}
+
+      <button className={`status-pill ${status === 'sold' ? 'is-sold' : ''}`} onClick={toggleStatus} type="button">
+        {status === 'sold' ? '✓ Sold — tap to restock' : 'Mark as Sold'}
+      </button>
 
       <input
         className="field"
@@ -97,6 +122,11 @@ export default function ArticleForm() {
       <button className="btn btn-gold btn-block" onClick={save}>
         Save Changes
       </button>
+      <button className="btn btn-outline btn-block" style={{ marginTop: 10 }} onClick={duplicate}>
+        Duplicate This Article
+      </button>
+
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }

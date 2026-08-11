@@ -1,15 +1,22 @@
 // src/pages/ArticleList.jsx
 //
-// The "All Articles" tab of Inventory. Same edit/export/delete actions
-// as before, plus three additions that a growing catalog actually
-// needs: filter by category (chips, built from whatever categories
-// are actually in use), a sort control, and a grid view — jewelry is a
-// visual product, and browsing thumbnails is often faster than reading
-// a list once there are more than a dozen pieces.
+// The "All Articles" tab of Inventory. On top of the original
+// edit/export/delete actions:
+//   - Filter by In Stock / Sold / All, and by category — chips built
+//     from whatever's actually in the current status scope.
+//   - Sort control + list/grid view toggle (grid matters for a visual
+//     product like jewelry).
+//   - A one-tap status pill next to each item's category to mark it
+//     sold or bring it back in stock, no need to open the edit screen.
+//   - Duplicate, for cloning a near-identical piece.
+//   - Delete no longer needs a confirm dialog — it removes instantly
+//     and offers a 5-second "Undo" toast instead, which is both safer
+//     (nothing is gone until the toast disappears) and faster (no
+//     "Are you sure?" popup breaking your flow).
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getArticles, deleteArticle, setExportUri, getGoldRate } from '../db';
+import { getArticles, deleteArticle, setExportUri, getGoldRate, duplicateArticle, setArticleStatus } from '../db';
 import { cropImage, downloadDataUrl } from '../imageUtils';
 import { computePrice, formatPKR, formatGrams } from '../priceUtils';
 import { CATEGORIES } from './ArticleTagger';
@@ -22,15 +29,25 @@ const SORTS = [
   { value: 'price', label: 'Sort: Price high–low' },
 ];
 
+const STATUS_TABS = [
+  { value: 'in_stock', label: 'In Stock' },
+  { value: 'sold', label: 'Sold' },
+  { value: 'all', label: 'All' },
+];
+
+const UNDO_DELAY_MS = 5000;
+
 export default function ArticleList() {
   const navigate = useNavigate();
   const [articles, setArticles] = useState([]);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('in_stock');
   const [category, setCategory] = useState('All');
   const [sortBy, setSortBy] = useState('newest');
   const [view, setView] = useState('list');
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useState(null); // { message, undo? }
   const [rate, setRate] = useState(0);
+  const pendingDeleteRef = useRef(null); // { id, timer }
 
   const load = useCallback(async (term = '') => {
     setArticles(await getArticles(term));
@@ -44,19 +61,64 @@ export default function ArticleList() {
   }, [load]);
 
   useEffect(() => {
-    if (!toast) return;
+    setCategory('All');
+  }, [statusFilter]);
+
+  useEffect(() => {
+    if (!toast || toast.undo) return; // undo toasts clear themselves on their own timer
     const t = setTimeout(() => setToast(null), 2600);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // If the screen unmounts (navigated away) while a delete is still
+  // "undoable", commit it rather than leaving it in limbo.
+  useEffect(() => {
+    return () => {
+      if (pendingDeleteRef.current) {
+        clearTimeout(pendingDeleteRef.current.timer);
+        deleteArticle(pendingDeleteRef.current.id);
+      }
+    };
+  }, []);
 
   const onSearch = (text) => {
     setSearch(text);
     load(text);
   };
 
-  const onDelete = async (id, name) => {
-    if (!window.confirm(`Delete "${name}"? This cannot be undone.`)) return;
-    await deleteArticle(id);
+  const onDelete = (item) => {
+    // A second delete while one is already pending commits the first
+    // immediately instead of silently dropping it.
+    if (pendingDeleteRef.current) {
+      clearTimeout(pendingDeleteRef.current.timer);
+      deleteArticle(pendingDeleteRef.current.id);
+    }
+    setArticles((prev) => prev.filter((a) => a.id !== item.id));
+    const timer = setTimeout(async () => {
+      await deleteArticle(item.id);
+      pendingDeleteRef.current = null;
+      setToast(null);
+    }, UNDO_DELAY_MS);
+    pendingDeleteRef.current = { id: item.id, timer };
+    setToast({ message: `Deleted "${item.name}".`, undo: true });
+  };
+
+  const onUndoDelete = () => {
+    if (!pendingDeleteRef.current) return;
+    clearTimeout(pendingDeleteRef.current.timer);
+    pendingDeleteRef.current = null;
+    setToast(null);
+    load(search);
+  };
+
+  const onDuplicate = async (item) => {
+    await duplicateArticle(item.id);
+    await load(search);
+    setToast({ message: `Duplicated "${item.name}".` });
+  };
+
+  const onToggleStatus = async (item) => {
+    await setArticleStatus(item.id, item.status === 'sold' ? 'in_stock' : 'sold');
     load(search);
   };
 
@@ -65,20 +127,26 @@ export default function ArticleList() {
       const croppedDataUrl = await cropImage(item.image_uri, item);
       await setExportUri(item.id, croppedDataUrl);
       downloadDataUrl(croppedDataUrl, `article_${item.id}.jpg`);
-      setToast(`Exported "${item.name}" — check your downloads.`);
+      setToast({ message: `Exported "${item.name}" — check your downloads.` });
       load(search);
     } catch (e) {
-      setToast(`Export failed: ${e.message}`);
+      setToast({ message: `Export failed: ${e.message}` });
     }
   };
 
+  const statusScoped = useMemo(() => {
+    if (statusFilter === 'all') return articles;
+    return articles.filter((a) => (a.status === 'sold' ? 'sold' : 'in_stock') === statusFilter);
+  }, [articles, statusFilter]);
+
   const categoriesPresent = useMemo(() => {
-    const set = new Set(articles.map((a) => a.category || 'Other'));
+    const set = new Set(statusScoped.map((a) => a.category || 'Other'));
     return CATEGORIES.filter((c) => set.has(c));
-  }, [articles]);
+  }, [statusScoped]);
 
   const visible = useMemo(() => {
-    const filtered = category === 'All' ? articles : articles.filter((a) => (a.category || 'Other') === category);
+    const filtered =
+      category === 'All' ? statusScoped : statusScoped.filter((a) => (a.category || 'Other') === category);
     const rows = [...filtered];
     switch (sortBy) {
       case 'oldest':
@@ -97,7 +165,7 @@ export default function ArticleList() {
         rows.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
     }
     return rows;
-  }, [articles, category, sortBy, rate]);
+  }, [statusScoped, category, sortBy, rate]);
 
   return (
     <div>
@@ -113,6 +181,19 @@ export default function ArticleList() {
           No gold rate set — prices below are Rs 0 until you set today's rate.
         </p>
       )}
+
+      <div className="segmented">
+        {STATUS_TABS.map((s) => (
+          <button
+            key={s.value}
+            className={statusFilter === s.value ? 'active' : ''}
+            onClick={() => setStatusFilter(s.value)}
+            type="button"
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
 
       {categoriesPresent.length > 0 && (
         <div className="chip-row scroll-x">
@@ -165,7 +246,7 @@ export default function ArticleList() {
       {view === 'list' ? (
         <div>
           {visible.map((item) => (
-            <div className="list-row" key={item.id}>
+            <div className={`list-row ${item.status === 'sold' ? 'is-sold' : ''}`} key={item.id}>
               <img className="thumb" src={item.export_uri || item.image_uri} alt={item.name} />
               <div className="row-info">
                 <div className="row-name">
@@ -174,15 +255,25 @@ export default function ArticleList() {
                 <div className="row-meta">
                   {formatGrams(item.weight_grams)} · {formatPKR(computePrice(item.weight_grams, rate))}
                 </div>
+                <button
+                  className={`status-pill ${item.status === 'sold' ? 'is-sold' : ''}`}
+                  onClick={() => onToggleStatus(item)}
+                  type="button"
+                >
+                  {item.status === 'sold' ? '✓ Sold — tap to restock' : 'Mark as Sold'}
+                </button>
               </div>
               <div className="row-actions">
                 <button className="link-btn link-edit" onClick={() => navigate(`/articles/${item.id}`)}>
                   Edit
                 </button>
+                <button className="link-btn link-duplicate" onClick={() => onDuplicate(item)}>
+                  Duplicate
+                </button>
                 <button className="link-btn link-export" onClick={() => onExport(item)}>
                   Export
                 </button>
-                <button className="link-btn link-delete" onClick={() => onDelete(item.id, item.name)}>
+                <button className="link-btn link-delete" onClick={() => onDelete(item)}>
                   Delete
                 </button>
               </div>
@@ -192,9 +283,10 @@ export default function ArticleList() {
       ) : (
         <div className="article-grid">
           {visible.map((item) => (
-            <div className="article-card" key={item.id}>
+            <div className={`article-card ${item.status === 'sold' ? 'is-sold' : ''}`} key={item.id}>
               <div className="article-card-img">
                 <img src={item.export_uri || item.image_uri} alt={item.name} />
+                {item.status === 'sold' && <span className="sold-ribbon">Sold</span>}
               </div>
               <div className="article-card-body">
                 <div className="row-name">{item.name}</div>
@@ -202,14 +294,24 @@ export default function ArticleList() {
                 <div className="row-meta">
                   {formatGrams(item.weight_grams)} · {formatPKR(computePrice(item.weight_grams, rate))}
                 </div>
+                <button
+                  className={`status-pill ${item.status === 'sold' ? 'is-sold' : ''}`}
+                  onClick={() => onToggleStatus(item)}
+                  type="button"
+                >
+                  {item.status === 'sold' ? '✓ Sold — tap to restock' : 'Mark as Sold'}
+                </button>
                 <div className="article-card-actions">
                   <button className="link-btn link-edit" onClick={() => navigate(`/articles/${item.id}`)}>
                     Edit
                   </button>
+                  <button className="link-btn link-duplicate" onClick={() => onDuplicate(item)}>
+                    Duplicate
+                  </button>
                   <button className="link-btn link-export" onClick={() => onExport(item)}>
                     Export
                   </button>
-                  <button className="link-btn link-delete" onClick={() => onDelete(item.id, item.name)}>
+                  <button className="link-btn link-delete" onClick={() => onDelete(item)}>
                     Delete
                   </button>
                 </div>
@@ -219,7 +321,16 @@ export default function ArticleList() {
         </div>
       )}
 
-      {toast && <div className="toast">{toast}</div>}
+      {toast && (
+        <div className="toast">
+          <span>{toast.message}</span>
+          {toast.undo && (
+            <button className="toast-undo-btn" onClick={onUndoDelete} type="button">
+              Undo
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
