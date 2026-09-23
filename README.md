@@ -31,7 +31,7 @@ up for every visitor or every device, that needs a real backend database
 (e.g. Vercel Postgres, Supabase) — the README in the original zip flagged
 this same trade-off for the phone version.
 
-## Project structure (v2 layout)
+## Project structure (v3 layout)
 
 ```
 jewelry-shop-web/
@@ -41,21 +41,28 @@ jewelry-shop-web/
   src/
     main.jsx                # entry point, router setup
     App.jsx                  # route definitions + page titles
-    db.js                     # IndexedDB layer
+    db.js                     # IndexedDB layer (articles, settings, photos, photo_history, customers, bills)
     imageUtils.js              # file picking → data URL, canvas crop/export
-    priceUtils.js                # weight × gold rate → price, formatting
-    index.css                     # all styling (dark/gold theme)
+    priceUtils.js                # weight × gold rate → price/karat math, formatting
+    billUtils.js                  # bills → daily/weekly/monthly revenue records (BillingHome.jsx)
+    salesUtils.js                  # legacy: sold articles → revenue records (Dashboard.jsx's "Sold Today")
+    index.css                       # all styling (dark/gold theme)
     components/
       AppShell.jsx                # persistent nav: sidebar (desktop) / bottom tab bar (mobile)
     pages/
-      Dashboard.jsx                # rate ticker, stats, category breakdown, recent items
+      Dashboard.jsx                # rate ticker, stats, category breakdown, Billing snapshot, recent items
       ArticleTagger.jsx             # pick photo, tap to drop a tag, save   (/tag)
       InventoryLayout.jsx            # tab switcher wrapping the two inventory views
       ArticleList.jsx                 # searchable/filterable/sortable list + grid view (/inventory/list)
       ImageBoard.jsx                   # photo gallery + drag/resize block board (/inventory/board[/:id])
       ArticleForm.jsx                   # edit one article (/articles/:id)
       GoldRate.jsx                       # set today's rate (/rate)
-      Settings.jsx                        # backup/restore + about (/settings)
+      Calculator.jsx                      # standalone karat-purity quote tool, no DB writes (/calculator)
+      BillNew.jsx                          # pick articles → price each line → customer → finalize (/billing/new)
+      BillingHome.jsx                       # revenue KPIs + searchable bill list, replaces Sales.jsx (/billing)
+      BillView.jsx                           # one bill's read-only itemized invoice + print + void (/billing/:id)
+      CustomerDetail.jsx                      # one customer's purchase history (/customers/:id)
+      Settings.jsx                             # shop details + backup/restore + about (/settings)
 ```
 
 ### What changed from v1
@@ -74,6 +81,40 @@ a sort control, and a grid view for browsing by photo. Backup/restore
 moved under **Settings**, since it's an occasional admin task rather
 than a daily one. Home became a real **Dashboard** with a per-category
 weight breakdown and a "recently tagged" shortcut.
+
+## Billing & Calculator (v3)
+
+v3 brings the karat-purity pricing math from the standalone
+`jewellery-calculator` app into this one, and builds a real Billing
+feature on top of it — replacing the old single-tap "Mark as Sold"
+aggregation with itemized, auditable bills.
+
+- **Calculator** (`/calculator`) — a pure quote tool: weight, karat,
+  making charge, and wastage % in, a live total out. No DB writes.
+- **Billing** (`/billing`) — pick `in_stock` articles, price each line
+  (karat/making/wastage chosen per line, never stored on the article
+  itself), attach a customer by phone lookup, and finalize. Every
+  number on a finalized bill is a frozen snapshot — exactly like an
+  article's own `sold_price`, it never recomputes later even if the
+  gold rate moves or the article is edited afterward. `createBill()`
+  and `voidBill()` in `db.js` are each a single atomic transaction
+  across `bills` + `articles` (+ `customers`), so a bill can never be
+  half-created.
+- **Customers** — one row per phone number, autofilled at billing time
+  for repeat visits. Tap a customer's name on any invoice to see their
+  full purchase history (`/customers/:id`).
+- **Shop Details** (`/settings`) — shop name/address/phone and an
+  optional invoice prefix (e.g. `INV-`), used on every printed bill's
+  header and bill number, everywhere a bill number is shown.
+- **Printing** — the browser's native `window.print()` against a
+  dedicated `@media print` stylesheet. No PDF library — this project
+  stays at zero dependencies beyond React + `react-router-dom`.
+
+Bills are **voided, never deleted** (`voidBill()` restocks every
+article on the bill and flips its status to `'voided'`) — the audit
+trail matters more than a clean list, and a voided bill still shows up
+in the Billing list and on a customer's history, just excluded from
+every revenue total.
 
 ## Run it locally first (recommended)
 
