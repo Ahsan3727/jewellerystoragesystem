@@ -11,9 +11,11 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getArticles, getArticleStats, getGoldRate } from '../db';
+import { getArticles, getArticleStats, getGoldRate, getBills, getInventoryThresholds } from '../db';
 import { computePrice, getDisplayPrice, getGoldWeight, formatPKR, formatGrams } from '../priceUtils';
-import { summarizeRange, todayStart } from '../salesUtils';
+import { summarizeRange, todayStart, thisWeekStart } from '../salesUtils';
+import { summarizeBillRange } from '../billUtils';
+import { getAgingArticles, getLowStockCategories } from '../inventoryUtils';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -23,10 +25,23 @@ export default function Dashboard() {
   const [recent, setRecent] = useState([]);
   const [allArticles, setAllArticles] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  // Real, itemized bills (Phase 0+) — separate from the article-level
+  // "Sold Today" ticker further down, which reads whichever articles
+  // happen to carry status 'sold' (still true even for a piece marked
+  // sold outside Billing entirely — see getSoldArticles() in db.js).
+  // This card is the Billing-specific view: what actually got billed,
+  // sourced from billUtils.js the same way BillingHome.jsx is.
+  const [bills, setBills] = useState([]);
+  // Low-stock / aging thresholds (Phase 5C) — user-editable on
+  // Settings.jsx, defaults applied defensively there if the shop owner
+  // never visits that panel (see getInventoryThresholds() in db.js).
+  const [thresholds, setThresholds] = useState({ low_stock_count: 2, aging_days: 60 });
 
   useEffect(() => {
     getArticleStats().then(setStats);
     getGoldRate().then(setRate);
+    getBills().then(setBills);
+    getInventoryThresholds().then(setThresholds);
     getArticles().then((all) => {
       setRecent(all.slice(0, 4));
       setAllArticles(all);
@@ -64,6 +79,25 @@ export default function Dashboard() {
     return summarizeRange(soldOnly, todayStart(), rate.rate);
   }, [allArticles, rate.rate]);
 
+  // Bills Today / This Week (Phase 4) — a bill's own locked `total`,
+  // same as BillingHome.jsx's KPI cards, so this figure never drifts
+  // from what the Billing screen itself shows for the same range.
+  const billsToday = useMemo(() => summarizeBillRange(bills, todayStart()), [bills]);
+  const billsThisWeek = useMemo(() => summarizeBillRange(bills, thisWeekStart()), [bills]);
+
+  // Nudges (Phase 5C) — pure filtering over the same allArticles list
+  // already fetched above, via inventoryUtils.js so this math lives in
+  // exactly one place. Recomputes automatically whenever the thresholds
+  // change on Settings.jsx and this screen is next loaded.
+  const aging = useMemo(
+    () => getAgingArticles(allArticles, thresholds.aging_days),
+    [allArticles, thresholds.aging_days]
+  );
+  const lowStock = useMemo(
+    () => getLowStockCategories(allArticles, thresholds.low_stock_count),
+    [allArticles, thresholds.low_stock_count]
+  );
+
   return (
     <div>
       <button className="rate-ticker" onClick={() => navigate('/rate')} type="button">
@@ -96,21 +130,67 @@ export default function Dashboard() {
           <span className="quick-action-icon">🗂️</span>
           <span>Photo Boards</span>
         </button>
-        <button className="quick-action" onClick={() => navigate('/sales')} type="button">
+        <button className="quick-action" onClick={() => navigate('/billing')} type="button">
           <span className="quick-action-icon">🧾</span>
-          <span>Sales Record</span>
+          <span>Billing</span>
         </button>
       </div>
 
-      <button className="rate-ticker rate-ticker-sales" onClick={() => navigate('/sales')} type="button">
+      <button className="rate-ticker rate-ticker-sales" onClick={() => navigate('/billing')} type="button">
         <div>
           <span className="rate-ticker-label">Sold Today</span>
           <span className="rate-ticker-value">
             {soldToday.count} item{soldToday.count === 1 ? '' : 's'} · {formatPKR(soldToday.revenue)}
           </span>
         </div>
-        <span className="rate-ticker-edit">Sales Record →</span>
+        <span className="rate-ticker-edit">Billing →</span>
       </button>
+
+      <section className="panel">
+        <div className="panel-head-row">
+          <h2 className="panel-title">Billing</h2>
+          <button className="link-btn link-edit" onClick={() => navigate('/billing')} type="button">
+            See all
+          </button>
+        </div>
+        <div className="stats-row">
+          <StatCard label="Bills Today" value={billsToday.count} sub={formatPKR(billsToday.revenue)} />
+          <StatCard label="Bills This Week" value={billsThisWeek.count} sub={formatPKR(billsThisWeek.revenue)} />
+        </div>
+      </section>
+
+      {/* Only renders when there's actually something to flag — same
+          "nothing extra for a healthy shop" instinct as the empty state
+          just below. */}
+      {loaded && (aging.length > 0 || lowStock.length > 0) && (
+        <section className="panel">
+          <h2 className="panel-title">Nudges</h2>
+          {lowStock.map((c) => (
+            <button
+              key={c.category}
+              className="list-row list-row-link"
+              onClick={() => navigate('/inventory/list')}
+              type="button"
+            >
+              <div className="row-info">
+                <div className="row-name">
+                  ⚠️ Only {c.count} {c.category} left in stock.
+                </div>
+              </div>
+            </button>
+          ))}
+          {aging.length > 0 && (
+            <button className="list-row list-row-link" onClick={() => navigate('/inventory/list')} type="button">
+              <div className="row-info">
+                <div className="row-name">
+                  ⚠️ {aging.length} piece{aging.length === 1 ? '' : 's'} have been in stock over{' '}
+                  {thresholds.aging_days} days.
+                </div>
+              </div>
+            </button>
+          )}
+        </section>
+      )}
 
       {loaded && breakdown.length === 0 && recent.length === 0 && (
         <div className="panel">
@@ -186,7 +266,7 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ label, value, small, accent }) {
+function StatCard({ label, value, small, accent, sub }) {
   const valueClass = ['stat-value', small && 'stat-value-small', accent === 'muted' && 'stat-value-muted']
     .filter(Boolean)
     .join(' ');
@@ -194,6 +274,10 @@ function StatCard({ label, value, small, accent }) {
     <div className="stat-card">
       <div className={valueClass}>{value}</div>
       <div className="stat-label">{label}</div>
+      {/* sub is optional (Phase 4's Billing card uses it for revenue,
+          matching BillingHome.jsx's own BillStat) — every earlier
+          caller of StatCard omits it, so this renders nothing there. */}
+      {sub != null && <div className="stat-sub">{sub}</div>}
     </div>
   );
 }

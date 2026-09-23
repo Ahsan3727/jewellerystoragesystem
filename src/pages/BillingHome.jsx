@@ -17,8 +17,8 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getBills } from '../db';
-import { formatPKR } from '../priceUtils';
+import { getBills, getShopInfo } from '../db';
+import { formatPKR, formatBillNo } from '../priceUtils';
 import { groupBillsByPeriod, summarizeBillRange } from '../billUtils';
 import { todayStart, thisWeekStart, thisMonthStart } from '../salesUtils';
 
@@ -47,6 +47,10 @@ export default function BillingHome() {
   const [paymentFilter, setPaymentFilter] = useState('All');
   const [period, setPeriod] = useState('day');
   const [expandedKey, setExpandedKey] = useState(null);
+  // Same invoice-prefix setting BillView.jsx's header reads (Phase 4)
+  // — so a bill's number matches everywhere it's shown, not just on
+  // the printed invoice.
+  const [invoicePrefix, setInvoicePrefix] = useState('');
 
   const load = useCallback(async () => {
     setBills(await getBills());
@@ -56,6 +60,10 @@ export default function BillingHome() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    getShopInfo().then((info) => setInvoicePrefix(info.invoice_prefix));
+  }, []);
 
   // A payment filter chosen while looking at "Active" may no longer
   // make sense once switching to "Voided"/"All" — reset it along with
@@ -234,7 +242,8 @@ export default function BillingHome() {
                               >
                                 <div className="row-info">
                                   <div className="row-name">
-                                    Bill #{bill.bill_no} <span className="cat-tag">{bill.customer_name}</span>
+                                    Bill #{formatBillNo(bill.bill_no, invoicePrefix)}{' '}
+                                    <span className="cat-tag">{bill.customer_name}</span>
                                     {bill.status === 'voided' && (
                                       <span className="badge badge-voided" style={{ marginLeft: 6 }}>
                                         Voided
