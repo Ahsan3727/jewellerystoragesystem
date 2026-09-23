@@ -71,9 +71,109 @@ export function formatPKR(amount) {
   return `Rs ${n.toLocaleString('en-PK')}`;
 }
 
+// Formats a bill's number for display, honoring the shop's optional
+// invoice prefix (Settings → Shop Details → Invoice Prefix, Phase 4)
+// — e.g. prefix "INV-" turns bill_no 42 into "INV-42". Display-only:
+// the stored bill_no itself stays a plain sequential integer (see
+// getNextBillNumber()/createBill() in db.js), so the counter never has
+// to parse or strip a prefix that might be changed or cleared later.
+// Called everywhere a bill number is shown — BillView's invoice header
+// and printed bill, BillingHome's bill list — so it's only ever
+// formatted in this one place (same discipline as formatPKR() above).
+export function formatBillNo(billNo, prefix) {
+  const p = (prefix || '').trim();
+  return `${p}${billNo}`;
+}
+
 export function formatGrams(weightGrams) {
   const n = Number(weightGrams) || 0;
   // trim trailing zeros but keep up to 3 decimal places (jewelry scales
   // usually read to 0.001g)
   return `${parseFloat(n.toFixed(3))} g`;
+}
+
+/* ---------------------------- Karat pricing (Calculator + Billing) ---------------------------- */
+//
+// Everything below is ported from jewellery-calculator's standalone
+// karat-purity math (app/(tabs)/calculator.jsx) so both this app's
+// Calculator page and Billing use the exact same numbers a shop owner
+// already trusts from that app — karat/making-charge/wastage are never
+// stored on an article itself (chosen per line, at billing time or in
+// the Calculator), so this is the one place that math lives.
+
+// Common local karats, 24K (pure) down through 14K — ported verbatim
+// from jewellery-calculator's KARAT_LIST.
+export const KARAT_OPTIONS = [
+  { label: '24K (Pure)', value: 24 },
+  { label: '23.5K', value: 23.5 },
+  { label: '23K', value: 23 },
+  { label: '22.5K', value: 22.5 },
+  { label: '22K', value: 22 },
+  { label: '21.5K', value: 21.5 },
+  { label: '21K', value: 21 },
+  { label: '20.5K', value: 20.5 },
+  { label: '20K', value: 20 },
+  { label: '19.5K', value: 19.5 },
+  { label: '19K', value: 19 },
+  { label: '18.5K', value: 18.5 },
+  { label: '18K', value: 18 },
+  { label: '17.5K', value: 17.5 },
+  { label: '17K', value: 17 },
+  { label: '16.5K', value: 16.5 },
+  { label: '16K', value: 16 },
+  { label: '15K', value: 15 },
+  { label: '14K', value: 14 },
+];
+
+// karat → purity fraction (0–1), e.g. 21K → 0.875.
+//
+// jewellery-calculator computes this via the traditional Pakistani
+// "kaat" system (a deduction expressed in masha/ratti per tola) rather
+// than a plain fraction: multiplier = (24 - karat) / 3, kaatRatti =
+// multiplier * 12, purity = (96 - kaatRatti) / 96. That's algebraically
+// identical to karat / 24 for every value on KARAT_OPTIONS (checked:
+// 21K → 0.875 either way, 18K → 0.75 either way, 23.5K → 0.979166...
+// either way) — using the plain fraction here keeps this file free of
+// masha/ratti units, which nothing else in this app uses.
+export function purityFromKarat(karat) {
+  const k = Number(karat) || 0;
+  return Math.max(0, Math.min(1, k / 24));
+}
+
+// The one place gold value / making amount / wastage amount / line
+// total get computed for a billing line — the Calculator page, the
+// bill line editor, and the bill total all call this rather than
+// re-implementing the math inline (see point 6 of the implementation
+// plan). Mirrors computePrice() above, but at the karat actually sold
+// at (not always 24K) and with making charge (Rs per tola, same unit
+// as rate_per_tola) and wastage % (of gold value) layered on.
+//
+// weight_grams / stone_weight_grams: same meaning as getGoldWeight()
+// above — gold weight excludes any stone weight, so a stone-set piece
+// isn't priced as if the stones were gold too.
+export function computeLineItem({
+  weight_grams,
+  stone_weight_grams,
+  karat,
+  rate_per_tola,
+  making_charge,
+  wastage_percent,
+}) {
+  const goldWeight = getGoldWeight(weight_grams, stone_weight_grams);
+  const weightInTola = goldWeight / GRAMS_PER_TOLA;
+  const purity = purityFromKarat(karat);
+  const rate = Number(rate_per_tola) || 0;
+  const making = Number(making_charge) || 0;
+  const wastagePercent = Number(wastage_percent) || 0;
+
+  const effectiveRatePerTola = rate * purity;
+  const goldValue = Math.round(weightInTola * effectiveRatePerTola);
+  const makingAmount = Math.round(weightInTola * making);
+  const wastageAmount = Math.round(goldValue * (wastagePercent / 100));
+  // Sum the already-rounded components rather than rounding one raw
+  // sum (point 7) — this is what keeps a printed bill's total matching
+  // the sum of its printed lines to the rupee.
+  const lineTotal = goldValue + makingAmount + wastageAmount;
+
+  return { goldWeight, goldValue, makingAmount, wastageAmount, lineTotal };
 }

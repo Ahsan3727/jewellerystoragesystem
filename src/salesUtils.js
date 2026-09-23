@@ -1,14 +1,21 @@
 // src/salesUtils.js
 //
-// Turns a flat list of sold articles into the daily / weekly / monthly
-// sale records shown on the Sales screen. Pure functions only — no DB,
-// no React — same spirit as priceUtils.js: one shared place this math
-// happens so the numbers can't drift apart between screens.
+// Turns a flat list of sold articles into daily / weekly / monthly
+// sale records. Pure functions only — no DB, no React — same spirit as
+// priceUtils.js: one shared place this math happens so the numbers
+// can't drift apart between screens.
 //
 // Revenue always comes from getDisplayPrice() (priceUtils.js), which
 // prefers each article's own locked-in sale price over today's live
 // gold rate — so a sales record for last week doesn't change just
 // because the rate changed today.
+//
+// Dashboard.jsx's "Sold Today" ticker is the remaining caller — the
+// old Sales.jsx screen these were originally built for was replaced by
+// BillingHome.jsx in Phase 3, which reads real bills via billUtils.js
+// instead of inferring a sale record from articles' own sold_at/
+// sold_price fields (see billUtils.js for why that's a meaningfully
+// different — and more accurate — source of truth).
 
 import { getDisplayPrice } from './priceUtils';
 

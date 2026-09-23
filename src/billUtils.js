@@ -23,7 +23,16 @@
 // (see BillingHome.jsx), since those really are just "what is today"
 // with no sales-specific meaning at all.
 
+import { formatBillNo, formatPKR } from './priceUtils';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Small, stable, intentional duplication of BillView.jsx's own
+// PAYMENT_LABELS map — same reasoning as this file's date-bucketing
+// helpers above (see the file header): this is a self-contained
+// formatting concern, not worth threading a shared constant through an
+// import just for three words.
+const PAYMENT_LABELS = { paid: 'Paid', partial: 'Partial', unpaid: 'Unpaid' };
 
 function startOfDay(d) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -124,4 +133,43 @@ export function summarizeBillRange(bills, sinceDate) {
     revenue += Number(bill.total) || 0;
   }
   return { count, revenue };
+}
+
+// Plain-text, WhatsApp-friendly summary of a finalized bill — the one
+// place this formatting happens (same "one formula, one place"
+// discipline computeLineItem() enforces in priceUtils.js), called only
+// by BillView.jsx's Share button. Short lines, no HTML, no markdown —
+// this text goes straight into a share-sheet/WhatsApp message box, not
+// a reproduced invoice table.
+export function formatBillAsText(bill, shop) {
+  if (!bill) return '';
+  const lines = [];
+
+  lines.push(shop?.name || 'Jewelry Shop');
+  if (shop?.phone) lines.push(shop.phone);
+  lines.push('');
+
+  lines.push(`Bill #${formatBillNo(bill.bill_no, shop?.invoice_prefix)}`);
+  lines.push(
+    new Date(bill.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  );
+  lines.push('');
+
+  for (const item of bill.items || []) {
+    lines.push(`${item.name} (${item.karat}K) — ${formatPKR(item.line_total)}`);
+  }
+  lines.push('');
+
+  lines.push(`Subtotal: ${formatPKR(bill.subtotal)}`);
+  if (bill.discount_amount) lines.push(`Discount: − ${formatPKR(bill.discount_amount)}`);
+  lines.push(`Total: ${formatPKR(bill.total)}`);
+  lines.push(`Payment: ${PAYMENT_LABELS[bill.payment_status] || bill.payment_status}`);
+  if (bill.payment_status === 'partial') {
+    const balanceDue = Math.max(0, bill.total - (bill.amount_paid || 0));
+    lines.push(`Balance due: ${formatPKR(balanceDue)}`);
+  }
+  lines.push('');
+  lines.push('Thank you for your business!');
+
+  return lines.join('\n');
 }

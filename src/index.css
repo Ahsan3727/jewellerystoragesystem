@@ -745,6 +745,14 @@ label.field-label {
   color: #c4c4ca;
 }
 
+/* Same gold-soft "active" language as .chip.active / .segmented button.active —
+   used by BillNew.jsx's article picker for "added to this bill". */
+.status-pill.is-selected {
+  border-color: var(--gold);
+  background: var(--gold-soft);
+  color: var(--gold);
+}
+
 .sold-badge {
   display: inline-block;
   margin-left: 6px;
@@ -984,6 +992,8 @@ label.field-label {
 }
 
 .badge {
+  display: inline-block;
+  vertical-align: middle;
   padding: 3px 9px;
   border-radius: 12px;
   font-size: 10px;
@@ -999,6 +1009,32 @@ label.field-label {
 .badge-draft {
   background: var(--gold-soft);
   color: var(--gold);
+}
+
+/* ---- Bill payment / void status (BillingHome list rows, BillView header) ----
+   Same three-color language the rest of the app already uses for
+   status: success-green for "done", gold for "in between", danger-red
+   for "needs attention" — and the same muted gray sold-badge already
+   uses for "no longer active". */
+
+.badge-paid {
+  background: rgba(95, 181, 131, 0.18);
+  color: var(--success);
+}
+
+.badge-partial {
+  background: var(--gold-soft);
+  color: var(--gold);
+}
+
+.badge-unpaid {
+  background: rgba(224, 100, 90, 0.18);
+  color: var(--danger);
+}
+
+.badge-voided {
+  background: rgba(160, 160, 168, 0.18);
+  color: #c4c4ca;
 }
 
 .empty {
@@ -1587,5 +1623,165 @@ label.field-label {
 @media (prefers-reduced-motion: reduce) {
   .nav-card {
     transition: none;
+  }
+}
+
+/* ---- Printable invoice (BillView.jsx) ----
+   On screen this is just another dark .panel. The @media print block
+   further down is what actually makes it print cleanly — light
+   background, dark text, no nav chrome, no action buttons — via
+   window.print() (see BillView.jsx; no PDF library, point 11 of the
+   implementation plan). */
+
+.bill-invoice {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.invoice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.invoice-shop-name {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.invoice-shop-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.invoice-meta {
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.invoice-meta strong {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 18px;
+  color: var(--text);
+}
+
+.invoice-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 0 0 6px;
+}
+
+.invoice-customer {
+  margin-bottom: 18px;
+}
+
+.invoice-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 16px;
+}
+
+.invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.invoice-table th,
+.invoice-table td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.invoice-table th {
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.invoice-table td.num,
+.invoice-table th.num {
+  text-align: right;
+}
+
+.invoice-totals {
+  width: 100%;
+  max-width: 300px;
+  margin-left: auto;
+}
+
+.invoice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+/* Grows to fill a row but wraps onto its own line at a sane minimum —
+   Phase 5 adds Share and Record Payment alongside Print/Void, so up to
+   four buttons now share this row on narrow screens. */
+.invoice-actions .btn {
+  flex: 1 1 140px;
+}
+
+@media print {
+  .sidebar,
+  .bottom-nav,
+  .topbar-v2,
+  .toast,
+  .invoice-actions,
+  .modal-overlay {
+    display: none !important;
+  }
+
+  body,
+  .app-shell-v2,
+  .shell-main,
+  .shell-content {
+    background: #fff !important;
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .bill-invoice {
+    background: #fff !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .bill-invoice,
+  .bill-invoice * {
+    color: #000 !important;
+  }
+
+  .invoice-header,
+  .invoice-table th,
+  .invoice-table td {
+    border-color: #ccc !important;
+  }
+
+  .badge {
+    border: 1px solid #000 !important;
+    background: none !important;
   }
 }

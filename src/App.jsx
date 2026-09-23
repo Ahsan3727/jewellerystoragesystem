@@ -10,7 +10,11 @@ import ArticleList from './pages/ArticleList';
 import ImageBoard from './pages/ImageBoard';
 import ArticleForm from './pages/ArticleForm';
 import GoldRate from './pages/GoldRate';
-import Sales from './pages/Sales';
+import Calculator from './pages/Calculator';
+import BillNew from './pages/BillNew';
+import BillingHome from './pages/BillingHome';
+import BillView from './pages/BillView';
+import CustomerDetail from './pages/CustomerDetail';
 import Settings from './pages/Settings';
 
 // Every "top level" screen — reachable directly from the sidebar/bottom
@@ -23,7 +27,8 @@ const TITLES = {
   '/inventory/list': 'Inventory',
   '/inventory/board': 'Inventory · By Photo',
   '/rate': 'Gold Rate',
-  '/sales': 'Sales',
+  '/calculator': 'Calculator',
+  '/billing': 'Billing',
   '/settings': 'Settings',
 };
 
@@ -31,6 +36,14 @@ function titleFor(pathname) {
   if (TITLES[pathname]) return TITLES[pathname];
   if (pathname.startsWith('/articles/')) return 'Edit Article';
   if (pathname.startsWith('/inventory/board/')) return 'Manage Blocks';
+  if (pathname === '/billing/new') return 'New Bill';
+  // Any other /billing/:id is a single bill's read-only invoice — same
+  // "generic title for a drill-down screen" pattern as "Manage Blocks"
+  // above, rather than pulling the specific bill number in here.
+  if (pathname.startsWith('/billing/')) return 'Invoice';
+  // /customers/:id — reached by tapping a customer's name on a bill's
+  // "Billed To" section (Phase 4). Same generic-title convention.
+  if (pathname.startsWith('/customers/')) return 'Customer';
   return 'Jewelry Shop';
 }
 
@@ -80,7 +93,11 @@ export default function App() {
 
         <Route path="/articles/:id" element={<ArticleForm />} />
         <Route path="/rate" element={<GoldRate />} />
-        <Route path="/sales" element={<Sales />} />
+        <Route path="/calculator" element={<Calculator />} />
+        <Route path="/billing" element={<BillingHome />} />
+        <Route path="/billing/new" element={<BillNew />} />
+        <Route path="/billing/:id" element={<BillView />} />
+        <Route path="/customers/:id" element={<CustomerDetail />} />
         <Route path="/settings" element={<Settings />} />
       </Routes>
     </AppShell>
