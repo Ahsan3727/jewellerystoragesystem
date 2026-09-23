@@ -1,9 +1,10 @@
 // src/components/AppShell.jsx
 //
-// The persistent navigation frame for the whole app. Five top-level
+// The persistent navigation frame for the whole app. Top-level
 // destinations live here (Dashboard, Tag New, Inventory, Gold Rate,
-// Settings) instead of the old "stack of buttons on Home" pattern —
-// they're always one tap away no matter what screen you're on.
+// Calculator, Billing, Settings) instead of the old "stack of buttons on
+// Home" pattern — they're always one tap away no matter what screen
+// you're on.
 //
 // Rendered twice on purpose: as a left sidebar on wide screens and as
 // a bottom tab bar on narrow ones. Which one shows is pure CSS
@@ -22,7 +23,8 @@ export const NAV_ITEMS = [
     match: (p) => p.startsWith('/inventory') || p.startsWith('/articles/'),
   },
   { to: '/rate', label: 'Gold Rate', icon: '💰', match: (p) => p === '/rate' },
-  { to: '/sales', label: 'Sales', icon: '🧾', match: (p) => p === '/sales' },
+  { to: '/calculator', label: 'Calculator', icon: '🧮', match: (p) => p === '/calculator' },
+  { to: '/billing', label: 'Billing', icon: '🧾', match: (p) => p.startsWith('/billing') },
   { to: '/settings', label: 'Settings', icon: '⚙️', match: (p) => p === '/settings' },
 ];
 
